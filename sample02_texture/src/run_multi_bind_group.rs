@@ -9,7 +9,11 @@ use winit::{
     window::Window,
 };
 
-use crate::{key::InputState, sprite::SpriteInstance, texture};
+use crate::{
+    key::InputState,
+    sprite::SpriteInstance,
+    texture::{self, Texture},
+};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -79,6 +83,8 @@ pub struct State {
     // textureとbind_groupをvecにする
     #[allow(dead_code)]
     textures: Vec<texture::Texture>,
+    #[allow(dead_code)]
+    sampler: wgpu::Sampler,
     bind_groups: Vec<wgpu::BindGroup>,
     #[allow(dead_code)]
     uniform_buffer: wgpu::Buffer, // 保持しているだけ
@@ -166,11 +172,12 @@ impl State {
         let mut textures = Vec::with_capacity(2);
         let diffuse_bytes = include_bytes!("pipo-enemy021.png");
         let diffuse_texture =
-            texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "enemy021").unwrap();
+            Texture::from_bytes(&device, &queue, diffuse_bytes, "enemy021").unwrap();
         let e2_bytes = include_bytes!("cm_001.png");
-        let texture_e2 = texture::Texture::from_bytes(&device, &queue, e2_bytes, "cm_001").unwrap();
+        let texture_e2 = Texture::from_bytes(&device, &queue, e2_bytes, "cm_001").unwrap();
         textures.push(diffuse_texture);
         textures.push(texture_e2);
+        let sampler = Texture::create_sampler(&device);
 
         // テクスチャグループレイアウト
         let texture_bind_group_layout =
@@ -207,7 +214,7 @@ impl State {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&textures[0].sampler),
+                    resource: wgpu::BindingResource::Sampler(&sampler),
                 },
             ],
             label: Some("diffuse_bind_group"),
@@ -221,7 +228,7 @@ impl State {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&textures[1].sampler),
+                    resource: wgpu::BindingResource::Sampler(&sampler),
                 },
             ],
             label: Some("diffuse_bind_group"),
@@ -377,6 +384,7 @@ impl State {
             index4_buffer,
             num_indices,
             textures,
+            sampler,
             bind_groups,
             render_pipeline: uniform_render_pipeline,
             vertex4_buffer: vertex_local_buffer,

@@ -83,6 +83,8 @@ pub struct State {
     // textureとbind_groupをvecにする
     #[allow(dead_code)]
     texture: texture::Texture,
+    #[allow(dead_code)]
+    sampler: wgpu::Sampler,
     texture_bind_group: wgpu::BindGroup,
     #[allow(dead_code)]
     uniform_buffer: wgpu::Buffer, // 保持しているだけ
@@ -171,6 +173,7 @@ impl State {
 
         let array_texture =
             Texture::from_array_bytes(&device, &queue, array_bytes, "Texture 2D Array")?;
+        let sampler = Texture::create_sampler(&device);
 
         // テクスチャグループレイアウト
         let texture_bind_group_layout =
@@ -206,7 +209,7 @@ impl State {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&array_texture.sampler),
+                    resource: wgpu::BindingResource::Sampler(&sampler),
                 },
             ],
             label: Some("texture_bind_group"),
@@ -360,6 +363,7 @@ impl State {
             index4_buffer,
             num_indices,
             texture: array_texture,
+            sampler,
             texture_bind_group,
             render_pipeline: uniform_render_pipeline,
             vertex4_buffer: vertex_local_buffer,

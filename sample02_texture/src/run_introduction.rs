@@ -9,7 +9,7 @@ use winit::{
     window::Window,
 };
 
-use crate::texture;
+use crate::texture::{self, Texture};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -79,7 +79,9 @@ pub struct State {
     index4_buffer: wgpu::Buffer,
     num_indices: u32,
     #[allow(dead_code)]
-    diffuse_texture: texture::Texture, // 現在は使っていない
+    diffuse_texture: texture::Texture,
+    #[allow(dead_code)]
+    sampler: wgpu::Sampler,
     diffuse_bind_group: wgpu::BindGroup,
     window: Arc<Window>,
 }
@@ -160,7 +162,8 @@ impl State {
 
         let diffuse_bytes = include_bytes!("pipo-enemy021.png");
         let diffuse_texture =
-            texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "enemy021").unwrap();
+            Texture::from_bytes(&device, &queue, diffuse_bytes, "enemy021").unwrap();
+        let sampler = Texture::create_sampler(&device);
 
         // テクスチャグループレイアウト
         let texture_bind_group_layout =
@@ -196,7 +199,7 @@ impl State {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler), // 色を抽出できるようにするためのもの
+                    resource: wgpu::BindingResource::Sampler(&sampler), // 色を抽出できるようにするためのもの
                 },
             ],
             label: Some("diffuse_bind_group"),
@@ -280,6 +283,7 @@ impl State {
             index4_buffer,
             num_indices,
             diffuse_texture,
+            sampler,
             diffuse_bind_group,
             window,
         })

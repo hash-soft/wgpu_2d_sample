@@ -82,7 +82,9 @@ pub struct State {
     num_indices: u32,
     // textureとbind_groupをvecにする
     #[allow(dead_code)]
-    texture: texture::Texture,
+    textures: Vec<texture::Texture>,
+    #[allow(dead_code)]
+    sampler: wgpu::Sampler,
     texture_bind_group: wgpu::BindGroup,
     #[allow(dead_code)]
     uniform_buffer: wgpu::Buffer, // 保持しているだけ
@@ -172,10 +174,15 @@ impl State {
 
         let dragon_bytes: &[u8] = include_bytes!("pipo-enemy021.png");
         let oni_bytes: &[u8] = include_bytes!("pipo-enemy019.png");
-        let array_bytes = vec![dragon_bytes, oni_bytes];
+        let purin_bytes: &[u8] = include_bytes!("cm_001.png");
+        let array_bytes = vec![dragon_bytes, oni_bytes, purin_bytes];
 
-        let array_texture =
-            Texture::from_array_bytes(&device, &queue, array_bytes, "Texture 2D Array")?;
+        let mut textures = Vec::with_capacity(array_bytes.len());
+        for bytes in array_bytes.iter() {
+            let texture = Texture::from_bytes(&device, &queue, bytes, "Texture 2D")?;
+            textures.push(texture);
+        }
+        let sampler = Texture::create_sampler(&device);
 
         // テクスチャグループレイアウト
         let texture_bind_group_layout =
@@ -183,16 +190,36 @@ impl State {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT, // フラグメントシェーダーで使う
+                        visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2Array,
+                            view_dimension: wgpu::TextureViewDimension::D2,
                             sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         },
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                         count: None,
@@ -207,11 +234,20 @@ impl State {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&array_texture.view),
+                    resource: wgpu::BindingResource::TextureView(&textures[0].view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&array_texture.sampler),
+                    resource: wgpu::BindingResource::TextureView(&textures[1].view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&textures[2].view),
+                },
+                // サンプラーは同じなので1番目のテクスチャを使う
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
                 },
             ],
             label: Some("texture_bind_group"),
@@ -246,7 +282,7 @@ impl State {
 
         let uniform_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Uniform Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader_2d_array.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader_multi_entry.wgsl").into()),
         });
 
         // Uniformを使用したパイプライン
@@ -328,8 +364,8 @@ impl State {
             SpriteInstance {
                 position: [400.0, 300.0],
                 size: [
-                    array_texture.texture.width() as f32,
-                    array_texture.texture.height() as f32,
+                    textures[0].texture.width() as f32,
+                    textures[0].texture.height() as f32,
                 ],
                 uv_offset: [0.0, 0.0],
                 uv_size: [1.0, 1.0],
@@ -339,12 +375,22 @@ impl State {
             SpriteInstance {
                 position: [100.0, 100.0],
                 size: [
-                    array_texture.texture.width() as f32,
-                    array_texture.texture.height() as f32,
+                    textures[1].texture.width() as f32,
+                    textures[1].texture.height() as f32,
                 ],
                 uv_offset: [0.0, 0.0],
                 uv_size: [1.0, 1.0],
                 texture_index: 1,
+            },
+            SpriteInstance {
+                position: [100.0, 400.0],
+                size: [
+                    textures[2].texture.width() as f32,
+                    textures[2].texture.height() as f32,
+                ],
+                uv_offset: [0.0, 0.0],
+                uv_size: [1.0, 1.0],
+                texture_index: 2,
             },
         ];
 
@@ -364,7 +410,8 @@ impl State {
             config,
             index4_buffer,
             num_indices,
-            texture: array_texture,
+            textures,
+            sampler,
             texture_bind_group,
             render_pipeline: uniform_render_pipeline,
             vertex4_buffer: vertex_local_buffer,

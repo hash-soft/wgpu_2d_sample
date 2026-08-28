@@ -9,7 +9,11 @@ use winit::{
     window::Window,
 };
 
-use crate::{key::InputState, sprite::SpriteInstance, texture};
+use crate::{
+    key::InputState,
+    sprite::SpriteInstance,
+    texture::{self, Texture},
+};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -78,6 +82,8 @@ pub struct State {
     num_indices: u32,
     #[allow(dead_code)]
     diffuse_texture: texture::Texture, // 現在は使っていない
+    #[allow(dead_code)]
+    sampler: wgpu::Sampler,
     diffuse_bind_group: wgpu::BindGroup,
     // introductionに比べてこの先のuniformとinstanceが増えている
     #[allow(dead_code)]
@@ -167,7 +173,8 @@ impl State {
 
         let diffuse_bytes = include_bytes!("pipo-enemy021.png");
         let diffuse_texture =
-            texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "enemy021").unwrap();
+            Texture::from_bytes(&device, &queue, diffuse_bytes, "enemy021").unwrap();
+        let sampler = Texture::create_sampler(&device);
 
         // テクスチャグループレイアウト
         let texture_bind_group_layout =
@@ -203,7 +210,7 @@ impl State {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                    resource: wgpu::BindingResource::Sampler(&sampler),
                 },
             ],
             label: Some("diffuse_bind_group"),
@@ -357,6 +364,7 @@ impl State {
             index4_buffer,
             num_indices,
             diffuse_texture,
+            sampler,
             diffuse_bind_group,
             render_pipeline: uniform_render_pipeline,
             vertex4_buffer: vertex_local_buffer,
