@@ -1,0 +1,9 @@
+[package]
+name = "wgpu_2d_sample"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+[workspace]
+members = ["sample01_polygon", "sample02_texture", "sample03_viewport"]
