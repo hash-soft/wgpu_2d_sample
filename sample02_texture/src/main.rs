@@ -1,11 +1,13 @@
 mod key;
 mod run_bind_group_multi_entry;
+mod run_bindless;
 mod run_introduction;
 mod run_multi_2d_array;
 mod run_multi_bind_group;
 mod run_uniform;
 mod sprite;
 mod texture;
+
 fn main() -> anyhow::Result<()> {
     let default_run_id: i32 = 99;
 
@@ -39,6 +41,7 @@ fn main() -> anyhow::Result<()> {
         1 => run_uniform::run(),
         2 => run_multi_bind_group::run(),
         3 => run_multi_2d_array::run(),
-        _ => run_bind_group_multi_entry::run(),
+        4 => run_bind_group_multi_entry::run(),
+        _ => run_bindless::run(),
     }
 }

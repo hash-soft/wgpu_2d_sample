@@ -9,11 +9,7 @@ use winit::{
     window::Window,
 };
 
-use crate::{
-    key::InputState,
-    sprite::SpriteInstance,
-    texture::{DynamicShader, Texture},
-};
+use crate::{key::InputState, sprite::SpriteInstance, texture::Texture};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -82,8 +78,6 @@ pub struct State {
     num_indices: u32,
     // textureとbind_groupをvecにする
     #[allow(dead_code)]
-    empty_texture: Texture,
-    #[allow(dead_code)]
     textures: Vec<Texture>,
     #[allow(dead_code)]
     sampler: wgpu::Sampler,
@@ -128,26 +122,23 @@ impl State {
         println!("=== WGPU Debug Info ===");
         let limits = adapter.limits();
         println!(
-            "Max sampled textures per shader stage: {}",
-            limits.max_sampled_textures_per_shader_stage
+            "Max binding array elements: {}",
+            limits.max_binding_array_elements_per_shader_stage
         );
-        println!("Max bind groups: {}", limits.max_bind_groups);
-        println!(
-            "Max bindings per bind group: {}",
-            limits.max_bindings_per_bind_group
-        );
-
-        let max_sampled_textures = Texture::request_max_sampled_textures(&limits, 32);
+        let max_binding_array_elements =
+            std::cmp::min(64, limits.max_binding_array_elements_per_shader_stage);
 
         // 探したAdapterからDeviceとQueueを作る
+        // bindingを拡張する
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
-                label: Some("sample02"),                    // デバイス特定のためつけておく
-                required_features: wgpu::Features::empty(), // 拡張機能不要なのでempty
+                label: Some("sample02"), // デバイス特定のためつけておく
+                required_features: wgpu::Features::TEXTURE_BINDING_ARRAY
+                    | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(), // 実験的機能は不要
                 required_limits: wgpu::Limits {
-                    // テクスチャエントリー数だけ指定
-                    max_sampled_textures_per_shader_stage: max_sampled_textures,
+                    // バインド要素数だけ指定
+                    max_binding_array_elements_per_shader_stage: max_binding_array_elements,
                     ..wgpu::Limits::default()
                 },
                 memory_hints: Default::default(), // メモリ割り当て方法は標準
@@ -180,9 +171,6 @@ impl State {
 
         println!("=======================");
 
-        let dynamic_shader = DynamicShader::create_multiple_texture(max_sampled_textures);
-
-        let empty_texture = Texture::create_empty_texture(&device, &queue);
         let dragon_bytes: &[u8] = include_bytes!("pipo-enemy021.png");
         let oni_bytes: &[u8] = include_bytes!("pipo-enemy019.png");
         let purin_bytes: &[u8] = include_bytes!("cm_001.png");
@@ -195,57 +183,47 @@ impl State {
         }
         let sampler = Texture::create_sampler(&device);
 
-        // サンプラー分を1つ引く
-        let texture_count = max_sampled_textures.saturating_sub(1);
-        let mut layout_entries = Vec::with_capacity(max_sampled_textures as usize);
-        for i in 0..texture_count {
-            layout_entries.push(wgpu::BindGroupLayoutEntry {
-                binding: i as u32,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    multisampled: false,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                },
-                count: None,
-            });
-        }
-        layout_entries.push(wgpu::BindGroupLayoutEntry {
-            binding: texture_count,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-            count: None,
-        });
-
         // テクスチャグループレイアウト
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &layout_entries,
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT, // フラグメントシェーダーで使う
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        },
+                        count: Some(std::num::NonZeroU32::new(3).unwrap()),
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                        count: None,
+                    },
+                ],
                 label: Some("texture_bind_group_layout"),
             });
-
-        let mut group_entries = Vec::with_capacity(max_sampled_textures as usize);
-        for (i, texture) in textures.iter().enumerate() {
-            group_entries.push(wgpu::BindGroupEntry {
-                binding: i as u32,
-                resource: wgpu::BindingResource::TextureView(&texture.view),
-            });
-        }
-        while group_entries.len() < texture_count as usize {
-            group_entries.push(wgpu::BindGroupEntry {
-                binding: group_entries.len() as u32,
-                resource: wgpu::BindingResource::TextureView(&empty_texture.view),
-            });
-        }
-        group_entries.push(wgpu::BindGroupEntry {
-            binding: texture_count,
-            resource: wgpu::BindingResource::Sampler(&sampler),
-        });
 
         // テクスチャバインドグループ
         let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_bind_group_layout,
-            entries: &group_entries,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureViewArray(&[
+                        &textures[0].view,
+                        &textures[1].view,
+                        &textures[2].view,
+                    ]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
             label: Some("texture_bind_group"),
         });
 
@@ -276,10 +254,9 @@ impl State {
                 immediate_size: 0,
             });
 
-        // shader_multi_entry.wgslの動的バージョンを指定している
         let uniform_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Uniform Shader"),
-            source: wgpu::ShaderSource::Wgsl(dynamic_shader.source.into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader_bindless.wgsl").into()),
         });
 
         // Uniformを使用したパイプライン
@@ -379,18 +356,9 @@ impl State {
                 uv_size: [1.0, 1.0],
                 texture_index: 1,
             },
+            // スプライト 2（へなへなプリン）
             SpriteInstance {
                 position: [100.0, 400.0],
-                size: [
-                    textures[2].texture.width() as f32,
-                    textures[2].texture.height() as f32,
-                ],
-                uv_offset: [0.0, 0.0],
-                uv_size: [1.0, 1.0],
-                texture_index: 2,
-            },
-            SpriteInstance {
-                position: [200.0, 400.0],
                 size: [
                     textures[2].texture.width() as f32,
                     textures[2].texture.height() as f32,
@@ -417,7 +385,6 @@ impl State {
             config,
             index4_buffer,
             num_indices,
-            empty_texture,
             textures,
             sampler,
             texture_bind_group,
