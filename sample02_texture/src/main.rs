@@ -23,7 +23,8 @@ fn main() -> anyhow::Result<()> {
                     "multi_bind_group" => 2,       // BindGropuを複数登録し複数のテクスチャを表示
                     "2d_array" => 3,               // 1回描画で複数のテクスチャを表示
                     "bing_group_multi_entry" => 4, // 1つのBindGroup内で複数のテクスチャを登録
-                    "tilemap" => 5,
+                    "bindless" => 5,               // サイズの異なるテクスチャ配列
+                    "tilemap" => 6,
                     // 3. それ以外（数値でも特定の文字列でもない）ならデフォルト値
                     _ => default_run_id,
                 }

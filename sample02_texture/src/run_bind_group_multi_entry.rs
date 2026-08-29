@@ -12,7 +12,7 @@ use winit::{
 use crate::{
     key::InputState,
     sprite::SpriteInstance,
-    texture::{self, Texture},
+    texture::{DynamicShader, Texture},
 };
 
 #[repr(C)]
@@ -82,7 +82,9 @@ pub struct State {
     num_indices: u32,
     // textureとbind_groupをvecにする
     #[allow(dead_code)]
-    textures: Vec<texture::Texture>,
+    empty_texture: Texture,
+    #[allow(dead_code)]
+    textures: Vec<Texture>,
     #[allow(dead_code)]
     sampler: wgpu::Sampler,
     texture_bind_group: wgpu::BindGroup,
@@ -135,15 +137,20 @@ impl State {
             limits.max_bindings_per_bind_group
         );
 
+        let max_sampled_textures = Texture::request_max_sampled_textures(&limits, 32);
+
         // 探したAdapterからDeviceとQueueを作る
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("sample01"),                    // デバイス特定のためつけておく
                 required_features: wgpu::Features::empty(), // 拡張機能不要なのでempty
                 experimental_features: wgpu::ExperimentalFeatures::disabled(), // 実験的機能は不要
-                required_limits: wgpu::Limits::default(),   // 限界値は標準の制限値
-                memory_hints: Default::default(),           // メモリ割り当て方法は標準
-                trace: wgpu::Trace::Off,                    // 通常はOff
+                required_limits: wgpu::Limits {
+                    max_sampled_textures_per_shader_stage: max_sampled_textures,
+                    ..wgpu::Limits::default()
+                },
+                memory_hints: Default::default(), // メモリ割り当て方法は標準
+                trace: wgpu::Trace::Off,          // 通常はOff
             })
             .await
             .unwrap();
@@ -172,6 +179,9 @@ impl State {
 
         println!("=======================");
 
+        let dynamic_shader = DynamicShader::create_multiple_texture(max_sampled_textures);
+
+        let empty_texture = Texture::create_empty_texture(&device, &queue);
         let dragon_bytes: &[u8] = include_bytes!("pipo-enemy021.png");
         let oni_bytes: &[u8] = include_bytes!("pipo-enemy019.png");
         let purin_bytes: &[u8] = include_bytes!("cm_001.png");
@@ -184,72 +194,57 @@ impl State {
         }
         let sampler = Texture::create_sampler(&device);
 
+        // サンプラー分を1つ引く
+        let texture_count = max_sampled_textures.saturating_sub(1);
+        let mut layout_entries = Vec::with_capacity(max_sampled_textures as usize);
+        for i in 0..texture_count {
+            layout_entries.push(wgpu::BindGroupLayoutEntry {
+                binding: i as u32,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                },
+                count: None,
+            });
+        }
+        layout_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: texture_count,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+            count: None,
+        });
+
         // テクスチャグループレイアウト
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                        count: None,
-                    },
-                ],
+                entries: &layout_entries,
                 label: Some("texture_bind_group_layout"),
             });
+
+        let mut group_entries = Vec::with_capacity(max_sampled_textures as usize);
+        for (i, texture) in textures.iter().enumerate() {
+            group_entries.push(wgpu::BindGroupEntry {
+                binding: i as u32,
+                resource: wgpu::BindingResource::TextureView(&texture.view),
+            });
+        }
+        while group_entries.len() < texture_count as usize {
+            group_entries.push(wgpu::BindGroupEntry {
+                binding: group_entries.len() as u32,
+                resource: wgpu::BindingResource::TextureView(&empty_texture.view),
+            });
+        }
+        group_entries.push(wgpu::BindGroupEntry {
+            binding: texture_count,
+            resource: wgpu::BindingResource::Sampler(&sampler),
+        });
 
         // テクスチャバインドグループ
         let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&textures[0].view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&textures[1].view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&textures[2].view),
-                },
-                // サンプラーは同じなので1番目のテクスチャを使う
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
+            entries: &group_entries,
             label: Some("texture_bind_group"),
         });
 
@@ -280,9 +275,10 @@ impl State {
                 immediate_size: 0,
             });
 
+        // shader_multi_entry.wgslの動的バージョンを指定している
         let uniform_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Uniform Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader_multi_entry.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(dynamic_shader.source.into()),
         });
 
         // Uniformを使用したパイプライン
@@ -392,6 +388,16 @@ impl State {
                 uv_size: [1.0, 1.0],
                 texture_index: 2,
             },
+            SpriteInstance {
+                position: [200.0, 400.0],
+                size: [
+                    textures[2].texture.width() as f32,
+                    textures[2].texture.height() as f32,
+                ],
+                uv_offset: [0.0, 0.0],
+                uv_size: [1.0, 1.0],
+                texture_index: 2,
+            },
         ];
 
         // instanceバッファ
@@ -410,6 +416,7 @@ impl State {
             config,
             index4_buffer,
             num_indices,
+            empty_texture,
             textures,
             sampler,
             texture_bind_group,

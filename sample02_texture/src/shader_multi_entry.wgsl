@@ -1,3 +1,7 @@
+// sample02_texture\src\run_bind_group_multi_entry.rs
+// で同的作成しているシェーダの元となったファイル
+// 使っていないが残しておく
+
 // 画面全体で共通のデータ（画面サイズなど）
 struct GlobalUniforms {
     screen_size: vec2<f32>,

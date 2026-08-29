@@ -1,5 +1,6 @@
 use anyhow::*;
 use image::GenericImageView;
+use wgpu::Limits;
 
 pub struct Texture {
     #[allow(unused)]
@@ -8,6 +9,14 @@ pub struct Texture {
 }
 
 impl Texture {
+    /// サンプラー1枚を含む最大のテクスチャ数
+    pub fn request_max_sampled_textures(limits: &Limits, limit_texture_count: u32) -> u32 {
+        std::cmp::min(
+            limit_texture_count,
+            limits.max_sampled_textures_per_shader_stage,
+        )
+    }
+
     /// テクスチャ1つに対して1つのサンプラーは不要なので使いまわせるようにする
     pub fn create_sampler(device: &wgpu::Device) -> wgpu::Sampler {
         device.create_sampler(&wgpu::SamplerDescriptor {
@@ -19,6 +28,44 @@ impl Texture {
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         })
+    }
+
+    pub fn create_empty_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        let size = wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // 透明色 (0, 0, 0, 0) または黒などで初期化
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[0u8, 0u8, 0u8, 0u8],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            size,
+        );
+
+        Self { texture, view }
     }
 
     pub fn from_bytes(
@@ -167,5 +214,114 @@ impl Texture {
             texture: array_texture,
             view: array_texture_view,
         })
+    }
+}
+
+pub struct DynamicShader {
+    pub source: String,
+}
+
+impl DynamicShader {
+    /// テクスチャ1つに対して1つのサンプラーは不要なので使いまわせるようにする
+    pub fn create_multiple_texture(max_sampled_textures: u32) -> Self {
+        // let max_allowed = (limits.max_sampled_textures_per_shader_stage as usize).saturating_sub(1); // サンプラー分を1つ引く例
+        // // 最大32枚
+        // let texture_count = std::cmp::min(32, max_allowed);
+
+        let texture_count = max_sampled_textures.saturating_sub(1);
+        println!(
+            "max: {}, Dynamic Texture Count: {}",
+            max_sampled_textures, texture_count
+        );
+
+        // WGSLシェーダーコードの動的構築
+        let mut shader_source = String::new();
+
+        // 共通ヘッダー・頂点シェーダー部分の追加
+        shader_source.push_str(
+            r#"
+struct GlobalUniforms {
+    screen_size: vec2<f32>,
+}
+
+@group(1) @binding(0)
+var<uniform> global_uniforms: GlobalUniforms;
+
+struct VertexInput {
+    @location(0) position: vec2<f32>,
+    @location(1) tex_coords: vec2<f32>,
+}
+
+struct SpriteInstanceInput {
+    @location(2) display_position: vec2<f32>,
+    @location(3) display_size: vec2<f32>,
+    @location(4) uv_offset: vec2<f32>,
+    @location(5) uv_size: vec2<f32>,
+    @location(6) texture_index: u32,
+}
+
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) tex_coords: vec2<f32>,
+    @location(1) @interpolate(flat) texture_index: u32,
+}
+
+@vertex
+fn vs_main(model: VertexInput, instance: SpriteInstanceInput) -> VertexOutput {
+    var out: VertexOutput;
+    out.tex_coords = instance.uv_offset + model.tex_coords * instance.uv_size;
+    let pixel_pos = instance.display_position + model.position * instance.display_size;
+    let ndc_x = (pixel_pos.x / global_uniforms.screen_size.x) * 2.0 - 1.0;
+    let ndc_y = 1.0 - (pixel_pos.y / global_uniforms.screen_size.y) * 2.0;
+    out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
+    out.texture_index = instance.texture_index;
+    return out;
+}
+"#,
+        );
+
+        // フラグメントシェーダー用のテクスチャ変数宣言を動的に追加
+        for i in 0..texture_count {
+            shader_source.push_str(&format!(
+                "@group(0) @binding({}) var t_texture{}: texture_2d<f32>;\n",
+                i, i
+            ));
+        }
+        let sampler_binding_idx = texture_count;
+        shader_source.push_str(&format!(
+            "@group(0) @binding({}) var s_sampler: sampler;\n",
+            sampler_binding_idx
+        ));
+
+        // フラグメントシェーダーのメイン関数とswitch文を動的に構築
+        shader_source.push_str(
+            r#"
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    switch in.texture_index {
+"#,
+        );
+
+        for i in 1..texture_count {
+            shader_source.push_str(&format!(
+        "        case {}: {{\n            return textureSample(t_texture{}, s_sampler, in.tex_coords);\n        }}\n",
+        i, i
+    ));
+        }
+
+        shader_source.push_str(&format!(
+    "        default: {{\n            return textureSample(t_texture0, s_sampler, in.tex_coords);\n        }}\n"
+));
+
+        shader_source.push_str(
+            r#"
+    }
+}
+"#,
+        );
+
+        DynamicShader {
+            source: shader_source,
+        }
     }
 }
