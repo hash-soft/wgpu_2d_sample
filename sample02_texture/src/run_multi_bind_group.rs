@@ -18,7 +18,7 @@ use crate::{
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct TexVertex {
-    position: [f32; 3],
+    position: [f32; 2],
     tex_coords: [f32; 2],
 }
 
@@ -31,10 +31,10 @@ impl TexVertex {
                 wgpu::VertexAttribute {
                     offset: 0,
                     shader_location: 0, // @location(0) にあたる
-                    format: wgpu::VertexFormat::Float32x3,
+                    format: wgpu::VertexFormat::Float32x2,
                 },
                 wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress, // 前までのサイズ分進む
+                    offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress, // 前までのサイズ分進む
                     shader_location: 1,
                     format: wgpu::VertexFormat::Float32x2,
                 },
@@ -52,19 +52,19 @@ struct Uniforms {
 // 頂点データは 0.0 ~ 1.0 の矩形にする
 const VERTICES_LOCAL: &[TexVertex] = &[
     TexVertex {
-        position: [0.0, 0.0, 0.0],
+        position: [0.0, 0.0],
         tex_coords: [0.0, 0.0],
     }, // 左上
     TexVertex {
-        position: [0.0, 1.0, 0.0],
+        position: [0.0, 1.0],
         tex_coords: [0.0, 1.0],
     }, // 左下
     TexVertex {
-        position: [1.0, 1.0, 0.0],
+        position: [1.0, 1.0],
         tex_coords: [1.0, 1.0],
     }, // 右下
     TexVertex {
-        position: [1.0, 0.0, 0.0],
+        position: [1.0, 0.0],
         tex_coords: [1.0, 0.0],
     }, // 右上
 ];

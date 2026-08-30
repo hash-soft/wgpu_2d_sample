@@ -4,12 +4,19 @@ mod run_bindless;
 mod run_introduction;
 mod run_multi_2d_array;
 mod run_multi_bind_group;
+mod run_tilemap;
 mod run_uniform;
 mod sprite;
 mod texture;
 
 fn main() -> anyhow::Result<()> {
     let default_run_id: i32 = 99;
+
+    // 予定
+    // 既存の処理に追加する
+    // ・アニメーション
+    // ・拡大縮小回転（スプライト）
+    // ・フィルター
 
     // 第1引数（args[1]）を取得。引数が渡されていない場合は None
     let run_id: i32 = match std::env::args().nth(1) {
@@ -36,12 +43,16 @@ fn main() -> anyhow::Result<()> {
         None => default_run_id,
     };
 
+    println!("run_id: {}", run_id);
+
     match run_id {
         0 => run_introduction::run(),
         1 => run_uniform::run(),
         2 => run_multi_bind_group::run(),
         3 => run_multi_2d_array::run(),
         4 => run_bind_group_multi_entry::run(),
-        _ => run_bindless::run(),
+        5 => run_bindless::run(),
+        6 => run_tilemap::run(),
+        _ => run_tilemap::run(),
     }
 }
