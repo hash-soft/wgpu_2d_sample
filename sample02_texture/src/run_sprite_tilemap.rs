@@ -1,4 +1,5 @@
-/// スプライトから不要なデータをそぎ落とし、最低限の情報をシェーダーに渡す
+/// スプライトと同じ仕組みでタイルマップを実現する
+/// 単にスプライトを並べるだけ
 use std::{iter, sync::Arc};
 use wgpu::util::DeviceExt;
 use winit::{
@@ -13,26 +14,18 @@ use crate::{key::InputState, texture::Texture};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct AtlasInfo {
-    atlas_size: [u32; 2],
-    tile_uv_size: [f32; 2],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct GlobalUniforms {
+struct Uniforms {
     screen_size: [f32; 2],
-    tile_pixel_size: [f32; 2],
-    offset: [i32; 2],
-    animation: [u32; 2],
-    atlases: [AtlasInfo; 2],
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TileInstance {
-    pub grid_pos: [u16; 2], // グリッド座標 (x, y)
-    pub tile_data: u32,     // 上位16bit: texture_index, 下位16bit: tile_id
+    pub position: [f32; 2],  // 表示ピクセル位置
+    pub size: [f32; 2],      // 表示ピクセルサイズ
+    pub uv_offset: [f32; 2], // 切り出しUVオフセット
+    pub uv_size: [f32; 2],   // 切り出しUVサイズ
+    pub texture_index: u32,
 }
 
 impl TileInstance {
@@ -41,16 +34,34 @@ impl TileInstance {
             array_stride: std::mem::size_of::<TileInstance>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance, // ★ここを Instance にする
             attributes: &[
-                // location(0): grid_pos
+                // location(0): sprite_position
                 wgpu::VertexAttribute {
                     offset: 0,
                     shader_location: 0,
-                    format: wgpu::VertexFormat::Uint16x2,
+                    format: wgpu::VertexFormat::Float32x2,
                 },
-                // location(1): tile_data
+                // location(1): sprite_size
                 wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[u16; 2]>() as wgpu::BufferAddress,
+                    offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
                     shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                // location(2): uv_offset
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+                    shader_location: 2,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                // location(3): uv_size
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
+                    shader_location: 3,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                // location(4): texture_index
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
+                    shader_location: 4,
                     format: wgpu::VertexFormat::Uint32,
                 },
             ],
@@ -71,11 +82,8 @@ pub struct State {
     texture_bind_group: wgpu::BindGroup,
     uniform_bind_group: wgpu::BindGroup,
     instance_buffer: wgpu::Buffer,
-    global_unoform_buffer: wgpu::Buffer,
-    position: [i32; 2],
+    #[allow(dead_code)]
     map_data: Vec<u32>,
-    map_width: u32,
-    map_height: u32,
     tiles: Vec<TileInstance>,
     input: InputState,
     window: Arc<Window>,
@@ -204,7 +212,7 @@ impl State {
 
         let map_width = 100u32;
         let map_height = 100u32;
-        let mut map_data = vec![0u32; (map_width * map_height * 2) as usize];
+        let mut map_data = vec![0u32; (map_width * map_height) as usize];
         // サンプルとして格子模様のマップを作成
         for y in 0..map_height {
             for x in 0..map_width {
@@ -214,23 +222,12 @@ impl State {
                     // 市松模様の片方: テクスチャ0 の タイル0
                     (0, 0)
                 } else {
-                    // 市松模様のもう片方: テクスチャ0 の タイル1
-                    (0, 1)
+                    // 市松模様のもう片方: テクスチャ1 の タイル9
+                    (1, 9)
                 };
 
                 // もし複数のテクスチャをロードした場合、tex_index = 1 などと設定できる
                 map_data[idx] = (tex_index << 16) | (tile_id & 0xFFFF);
-            }
-        }
-        // 重ねる部分を作成
-        for y in 0..map_height {
-            for x in 0..map_width {
-                let idx = (y * map_width + x + map_width * map_height) as usize;
-                if y % 5 == 0 {
-                    map_data[idx] = (1 << 16) | (9 & 0xFFFF);
-                } else {
-                    map_data[idx] = (1 << 16) | 0xFFFF;
-                }
             }
         }
 
@@ -252,33 +249,8 @@ impl State {
 
         // ユニフォームデータ
         // シェーダーの共通データ
-        let uniform: GlobalUniforms = GlobalUniforms {
+        let uniform: Uniforms = Uniforms {
             screen_size: [size.width as f32, size.height as f32],
-            tile_pixel_size: [32.0, 32.0],
-            offset: [0, 0],
-            animation: [0, 0],
-            atlases: [
-                AtlasInfo {
-                    atlas_size: [
-                        textures[0].texture.width() / 32,
-                        textures[0].texture.height() / 32,
-                    ],
-                    tile_uv_size: [
-                        32.0 / textures[0].texture.width() as f32,
-                        32.0 / textures[0].texture.height() as f32,
-                    ],
-                },
-                AtlasInfo {
-                    atlas_size: [
-                        textures[1].texture.width() / 32,
-                        textures[1].texture.height() / 32,
-                    ],
-                    tile_uv_size: [
-                        32.0 / textures[1].texture.width() as f32,
-                        32.0 / textures[1].texture.height() as f32,
-                    ],
-                },
-            ],
         };
 
         // uniformバッファ
@@ -300,15 +272,15 @@ impl State {
         // WGSLシェーダーコードの動的構築
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Tilemap Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader_tilemap.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader_sprite_tilemap.wgsl").into()),
         });
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
-                    Some(&uniform_bind_group_layout),
                     Some(&texture_bind_group_layout),
+                    Some(&uniform_bind_group_layout),
                 ],
                 immediate_size: 0,
             });
@@ -317,44 +289,32 @@ impl State {
         for x in 0..25 {
             for y in 0..20 {
                 let tile = map_data[(y * map_width + x) as usize];
+                let texture_index = tile >> 16;
+                let texture_id = tile & 0xFFFF;
+                let texture = &textures[texture_index as usize];
+                let x_count = texture.texture.width() / 32;
+                //println!("{} {} {}", x, y, texture_id);
                 tiles.push(TileInstance {
-                    grid_pos: [x as u16, y as u16],
-                    tile_data: tile,
-                });
-            }
-        }
-        // 上に重ねる部分
-        let one_layer_size = map_width * map_height;
-        for x in 0..25 {
-            for y in 0..20 {
-                let tile = map_data[(y * map_width + x + one_layer_size) as usize];
-                if tile & 0xFFFF == 0xFFFF {
-                    continue;
-                }
-                tiles.push(TileInstance {
-                    grid_pos: [x as u16, y as u16],
-                    tile_data: tile,
+                    position: [(x * 32) as f32, (y * 32) as f32],
+                    size: [32.0, 32.0],
+                    uv_offset: [
+                        ((texture_id % x_count) * 32) as f32 / texture.texture.width() as f32,
+                        ((texture_id / x_count) * 32) as f32 / texture.texture.height() as f32,
+                    ],
+                    uv_size: [
+                        32.0 / texture.texture.width() as f32,
+                        32.0 / texture.texture.height() as f32,
+                    ],
+                    texture_index,
                 });
             }
         }
 
-        let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Instance Buffer"),
-            size: (std::mem::size_of::<TileInstance>() * 2048) as wgpu::BufferAddress, // 最大サイズ (2048体分)
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Uniform Buffer"),
+            contents: bytemuck::cast_slice(&tiles),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: true, // ← ここを true にすると作成と同時に書き込みを行うことが可能
         });
-        {
-            let initial_bytes = bytemuck::cast_slice(&tiles);
-
-            let mut buffer_view = instance_buffer
-                .slice(..initial_bytes.len() as wgpu::BufferAddress)
-                .get_mapped_range_mut()?;
-
-            // 取得した範囲全体にそのままコピーする
-            buffer_view.copy_from_slice(initial_bytes);
-        }
-        instance_buffer.unmap();
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
@@ -401,11 +361,7 @@ impl State {
             texture_bind_group,
             uniform_bind_group,
             instance_buffer,
-            global_unoform_buffer: uniform_buffer,
-            position: [0, 0],
             map_data,
-            map_width,
-            map_height,
             tiles,
             input: InputState::default(),
             window,
@@ -430,73 +386,13 @@ impl State {
     }
 
     fn update(&mut self) {
-        let speed = 8.0;
+        //let speed = 5.0;
         let [dx, dy] = self.input.direction();
 
         if dx != 0.0 || dy != 0.0 {
-            self.position[0] += (dx * speed) as i32;
-            self.position[1] += (dy * speed) as i32;
-            let tile_offset: [i32; 2];
-            tile_offset = [-(self.position[0] % 32), -(self.position[1] % 32)];
-            //println!("tile_offset: {:?}", tile_offset);
-
-            let offset = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
-            self.queue.write_buffer(
-                &self.global_unoform_buffer,
-                offset,
-                bytemuck::cast_slice(&[tile_offset]),
-            );
-
-            self.set_tile_data();
+            // self.camera_pos.x += dx * speed;
+            // self.camera_pos.y += dy * speed;
         }
-    }
-
-    fn set_tile_data(&mut self) {
-        let map_data = &self.map_data;
-        let map_width = self.map_width as i32;
-        let start_x = self.position[0] / 32;
-        let start_y = self.position[1] / 32;
-        let tiles = &mut self.tiles;
-        tiles.clear();
-        for y in 0..21 {
-            for x in 0..26 {
-                if x + start_x >= map_width
-                    || y + start_y >= map_width
-                    || x + start_x < 0
-                    || y + start_y < 0
-                {
-                    continue;
-                }
-                let tile = map_data[((y + start_y) * map_width + x + start_x) as usize];
-                tiles.push(TileInstance {
-                    grid_pos: [x as u16, y as u16],
-                    tile_data: tile,
-                });
-            }
-        }
-        let one_layer_size = (self.map_width * self.map_height) as usize;
-        for y in 0..21 {
-            for x in 0..26 {
-                if x + start_x >= map_width
-                    || y + start_y >= map_width
-                    || x + start_x < 0
-                    || y + start_y < 0
-                {
-                    continue;
-                }
-                let tile =
-                    map_data[((y + start_y) * map_width + x + start_x) as usize + one_layer_size];
-                if tile & 0xFFFF == 0xFFFF {
-                    continue;
-                }
-                tiles.push(TileInstance {
-                    grid_pos: [x as u16, y as u16],
-                    tile_data: tile,
-                });
-            }
-        }
-        self.queue
-            .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&tiles));
     }
 
     fn render(&mut self) -> anyhow::Result<()> {
@@ -552,8 +448,8 @@ impl State {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.texture_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.texture_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.instance_buffer.slice(..));
             render_pass.draw(0..4, 0..self.tiles.len() as u32);
         }

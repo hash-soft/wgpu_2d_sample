@@ -4,7 +4,10 @@ mod run_bindless;
 mod run_introduction;
 mod run_multi_2d_array;
 mod run_multi_bind_group;
+mod run_sprite_tilemap;
 mod run_tilemap;
+mod run_tilemap_instanced;
+mod run_tilemap_multi_indices;
 mod run_uniform;
 mod sprite;
 mod texture;
@@ -33,7 +36,10 @@ fn main() -> anyhow::Result<()> {
                     "2d_array" => 3,               // 1回描画で複数のテクスチャを表示
                     "bing_group_multi_entry" => 4, // 1つのBindGroup内で複数のテクスチャを登録
                     "bindless" => 5,               // サイズの異なるテクスチャ配列
-                    "tilemap" => 6,
+                    "sprite_tilemap" => 6, // スプライトをタイルマップのようにならべただけのもの
+                    "tilemap" => 7,        // sprite_tilemapの計算をシェーダー側でおこなったもの
+                    "tilemap_multi_indices" => 8,
+                    "tilemap_instanced" => 9,
                     // 3. それ以外（数値でも特定の文字列でもない）ならデフォルト値
                     _ => default_run_id,
                 }
@@ -52,7 +58,10 @@ fn main() -> anyhow::Result<()> {
         3 => run_multi_2d_array::run(),
         4 => run_bind_group_multi_entry::run(),
         5 => run_bindless::run(),
-        6 => run_tilemap::run(),
+        6 => run_sprite_tilemap::run(),
+        7 => run_tilemap::run(),
+        8 => run_tilemap_multi_indices::run(),
+        9 => run_tilemap_instanced::run(),
         _ => run_tilemap::run(),
     }
 }

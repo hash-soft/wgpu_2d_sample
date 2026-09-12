@@ -171,7 +171,7 @@ impl State {
             format: surface_format,                        // surface_capsから決定したフォーマット
             width: size.width,                             // ウィンドウ内部の幅
             height: size.height,                           // ウィンドウ内部の高さ
-            present_mode: surface_caps.present_modes[0], // 垂直同期などの表示モード（利用可能な最初のモード）
+            present_mode: surface_caps.present_modes[1], // 垂直同期などの表示モード（利用可能な最初のモード）
             alpha_mode: surface_caps.alpha_modes[0], // ウィンドウ背後との合成モード（利用可能な最初のモード）
             view_formats: vec![],                    // ビューフォーマットの追加設定（空）
             desired_maximum_frame_latency: 2,        // 最大フレームレイテンシ

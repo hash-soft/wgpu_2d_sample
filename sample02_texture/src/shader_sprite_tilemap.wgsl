@@ -1,24 +1,19 @@
 
-struct AtlasInfo {
-    atlas_size: vec2<u32>,
-    tile_uv_size: vec2<f32>,
-}
-
 // 画面全体で共通のデータ（画面サイズなど）
 struct GlobalUniforms {
     screen_size: vec2<f32>,
-    tile_pixel_size: vec2<f32>,
-    offset: vec2<i32>,
-    animation: vec2<u32>,
-    atlases: array<AtlasInfo, 2>,
 }
 
-@group(0) @binding(0) var<uniform> global_uniforms: GlobalUniforms;
+// todo グローバルからグループ番号を振りたい
+@group(1) @binding(0) var<uniform> global_uniforms: GlobalUniforms;
 
 // タイルごとの個別データ（インスタンス入力）
 struct TileInstanceInput {
-    @location(0) grid_pos: vec2<u32>, // 画面上のインデックス位置 (x, y)
-    @location(1) tile_data: u32,      // タイルデータ
+    @location(0) display_position: vec2<f32>, // 画面上のピクセル位置 (x, y)
+    @location(1) display_size: vec2<f32>,     // 画面上の表示サイズ (width, height)
+    @location(2) uv_offset: vec2<f32>,       // 切り出し左上 (u0, v0)
+    @location(3) uv_size: vec2<f32>,         // 切り出し幅・高さ (u_w, v_h)
+    @location(4) texture_index: u32,
 }
 
 struct VertexOutput {
@@ -38,21 +33,13 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32, instance: TileInstanceIn
         vec2<f32>(1.0, 1.0)
     );
 
-    let tex_index = instance.tile_data >> 16u;
-    let tile_id = instance.tile_data & 0xFFFFu;
-    let atlas = global_uniforms.atlases[tex_index];
-
-    let atlas_x = tile_id % atlas.atlas_size.x;
-    let atlas_y = tile_id / atlas.atlas_size.x;
-    let uv_offset = vec2<f32>(f32(atlas_x), f32(atlas_y)) * atlas.tile_uv_size;
-
     var out: VertexOutput;
     // 0.0 ~ 1.0 のローカル UV を指定矩形の UV 範囲にスケーリング・シフト
-    out.tex_coords = uv_offset + pos[in_vertex_index] * atlas.tile_uv_size;
+    out.tex_coords = instance.uv_offset + pos[in_vertex_index] * instance.uv_size;
+    //out.tex_coords = model.tex_coords;
 
     // ピクセル位置と画像サイズからスクリーン上のピクセル座標を計算
-    let tile_size = global_uniforms.tile_pixel_size;
-    let pixel_pos = vec2<f32>(instance.grid_pos) * tile_size + pos[in_vertex_index] * tile_size + vec2<f32>(global_uniforms.offset);
+    let pixel_pos = instance.display_position + pos[in_vertex_index] * instance.display_size;
 
     // ピクセル座標 (0 ~ screen_size) を NDC 座標 (-1.0 ~ 1.0) に変換
     // X: 0 -> -1.0, width -> 1.0
@@ -61,15 +48,30 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32, instance: TileInstanceIn
     let ndc_y = 1.0 - (pixel_pos.y / global_uniforms.screen_size.y) * 2.0;
 
     out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
-    out.texture_index = tex_index;
+    out.texture_index = instance.texture_index;
 
     return out;
 }
 
 // Fragment shader
-@group(1) @binding(0) var t_texture0: texture_2d<f32>;
-@group(1) @binding(1) var t_texture1: texture_2d<f32>;
-@group(1) @binding(2) var s_sampler: sampler;
+@group(0) @binding(0) var t_texture0: texture_2d<f32>;
+@group(0) @binding(1) var t_texture1: texture_2d<f32>;
+@group(0) @binding(2) var s_sampler: sampler;
+
+// struct AtlasInfo {
+//     atlas_size: vec2<u32>,
+//     tile_uv_size: vec2<f32>,
+// }
+
+// struct CameraUniform {
+//     view_proj: mat3x3<f32>,
+//     map_size: vec2<u32>,
+//     _padding: vec2<u32>,
+//     atlases: array<AtlasInfo, 8>,
+// }
+
+// @group(1) @binding(0) var<uniform> camera: CameraUniform;
+// @group(1) @binding(1) var<storage, read> map_data: array<u32>;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
