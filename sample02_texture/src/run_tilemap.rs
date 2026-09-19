@@ -1,6 +1,12 @@
 /// スプライトから不要なデータをそぎ落とし、最低限の情報をシェーダーに渡す
-use std::{iter, sync::Arc};
-use wgpu::util::DeviceExt;
+///
+/// todo
+/// ・回転の中心をずらせるようにする（優先低）
+/// ・拡大、縮小時に中心が追従するようにする（優先低）
+/// ・テクスチャとサンプラーの分離（優先中）
+/// ・後方からの見下ろし（簡単なら）（優先最低）
+/// ・実際にマップデータを読み込んでそれを表示する(作ったゲームのjson流用)（優先高）
+use std::{iter, ops::Range, sync::Arc};
 use winit::{
     application::ApplicationHandler,
     event::*,
@@ -9,7 +15,7 @@ use winit::{
     window::Window,
 };
 
-use crate::{key::InputState, texture::Texture};
+use crate::{key::InputState, texture::Texture, tile::TileInstance};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -21,41 +27,10 @@ struct AtlasInfo {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct GlobalUniforms {
-    screen_size: [f32; 2],
+    view_proj: [[f32; 4]; 4],
     tile_pixel_size: [f32; 2],
-    offset: [i32; 2],
-    animation: [u32; 2],
+    pettern: [u32; 2],
     atlases: [AtlasInfo; 2],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct TileInstance {
-    pub grid_pos: [u16; 2], // グリッド座標 (x, y)
-    pub tile_data: u32,     // 上位16bit: texture_index, 下位16bit: tile_id
-}
-
-impl TileInstance {
-    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<TileInstance>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Instance, // ★ここを Instance にする
-            attributes: &[
-                // location(0): grid_pos
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Uint16x2,
-                },
-                // location(1): tile_data
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[u16; 2]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Uint32,
-                },
-            ],
-        }
-    }
 }
 
 pub struct State {
@@ -72,11 +47,15 @@ pub struct State {
     uniform_bind_group: wgpu::BindGroup,
     instance_buffer: wgpu::Buffer,
     global_unoform_buffer: wgpu::Buffer,
-    position: [i32; 2],
+    camera_pos: [f32; 2],
+    scale: f32,
+    degress: f32,
     map_data: Vec<u32>,
     map_width: u32,
     map_height: u32,
+    map_count: u32,
     tiles: Vec<TileInstance>,
+    draw_ranges: Vec<Range<u32>>,
     input: InputState,
     window: Arc<Window>,
 }
@@ -117,6 +96,10 @@ impl State {
             .await
             .unwrap();
 
+        println!(
+            "device min_uniform_buffer_offset_aligment: {}",
+            device.limits().min_uniform_buffer_offset_alignment
+        );
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
             .formats
@@ -215,11 +198,16 @@ impl State {
                     (0, 0)
                 } else {
                     // 市松模様のもう片方: テクスチャ0 の タイル1
-                    (0, 1)
+                    (0, 73)
                 };
+                let anim_index = if tile_id == 73 { 4 } else { 0 };
 
-                // もし複数のテクスチャをロードした場合、tex_index = 1 などと設定できる
-                map_data[idx] = (tex_index << 16) | (tile_id & 0xFFFF);
+                // 31-28：テクスチャインデックス
+                // 27-24：アニメーションインデックス
+                // 23-21：アニメ枚数
+                // 15-0：タイルID
+                map_data[idx] =
+                    (tex_index << 28) | (anim_index << 24) | (3 << 21) | (tile_id & 0xFFFF);
             }
         }
         // 重ねる部分を作成
@@ -227,12 +215,69 @@ impl State {
             for x in 0..map_width {
                 let idx = (y * map_width + x + map_width * map_height) as usize;
                 if y % 5 == 0 {
-                    map_data[idx] = (1 << 16) | (9 & 0xFFFF);
+                    map_data[idx] = (1 << 28) | 1 << 21 | (9 & 0xFFFF);
                 } else {
-                    map_data[idx] = (1 << 16) | 0xFFFF;
+                    map_data[idx] = (1 << 28) | 1 << 21 | 0xFFFF;
                 }
             }
         }
+
+        // ユニフォームデータ
+        // シェーダーの共通データ
+        let uniform: GlobalUniforms = GlobalUniforms {
+            view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(),
+            tile_pixel_size: [16.0, 16.0],
+            pettern: [0, 0],
+            atlases: [
+                AtlasInfo {
+                    atlas_size: [
+                        textures[0].texture.width() / 16,
+                        textures[0].texture.height() / 16,
+                    ],
+                    tile_uv_size: [
+                        16.0 / textures[0].texture.width() as f32,
+                        16.0 / textures[0].texture.height() as f32,
+                    ],
+                },
+                AtlasInfo {
+                    atlas_size: [
+                        textures[1].texture.width() / 16,
+                        textures[1].texture.height() / 16,
+                    ],
+                    tile_uv_size: [
+                        16.0 / textures[1].texture.width() as f32,
+                        16.0 / textures[1].texture.height() as f32,
+                    ],
+                },
+            ],
+        };
+
+        // デバイスのアライメント制限を取得
+        let alignment = device.limits().min_uniform_buffer_offset_alignment as usize;
+        let uniform_size = std::mem::size_of::<GlobalUniforms>();
+        // アライメントの倍数にパディングを計算
+        // ２の累乗の最上位以外を落とす
+        let aligned_size = (uniform_size + alignment - 1) & !(alignment - 1);
+
+        // uniformバッファ
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Dynamic Uniform Buffer"),
+            size: (aligned_size * 2) as wgpu::BufferAddress,
+            //contents: bytemuck::cast_slice(&[uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: true,
+        });
+        {
+            let mut buffer_view = uniform_buffer.get_mapped_range_mut(..)?;
+
+            buffer_view
+                .slice(0..uniform_size)
+                .copy_from_slice(bytemuck::bytes_of(&uniform));
+            buffer_view
+                .slice(aligned_size..aligned_size + uniform_size)
+                .copy_from_slice(bytemuck::bytes_of(&uniform));
+        }
+        uniform_buffer.unmap();
 
         // ユニフォームグループレイアウト
         let uniform_bind_group_layout =
@@ -242,57 +287,23 @@ impl State {
                     visibility: wgpu::ShaderStages::VERTEX, // 頂点シェーダーで参照するため
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                        has_dynamic_offset: true,
+                        min_binding_size: Some(wgpu::BufferSize::new(uniform_size as u64).unwrap()),
                     },
                     count: None,
                 }],
                 label: Some("uniform_bind_group_layout"),
             });
 
-        // ユニフォームデータ
-        // シェーダーの共通データ
-        let uniform: GlobalUniforms = GlobalUniforms {
-            screen_size: [size.width as f32, size.height as f32],
-            tile_pixel_size: [32.0, 32.0],
-            offset: [0, 0],
-            animation: [0, 0],
-            atlases: [
-                AtlasInfo {
-                    atlas_size: [
-                        textures[0].texture.width() / 32,
-                        textures[0].texture.height() / 32,
-                    ],
-                    tile_uv_size: [
-                        32.0 / textures[0].texture.width() as f32,
-                        32.0 / textures[0].texture.height() as f32,
-                    ],
-                },
-                AtlasInfo {
-                    atlas_size: [
-                        textures[1].texture.width() / 32,
-                        textures[1].texture.height() / 32,
-                    ],
-                    tile_uv_size: [
-                        32.0 / textures[1].texture.width() as f32,
-                        32.0 / textures[1].texture.height() as f32,
-                    ],
-                },
-            ],
-        };
-
-        // uniformバッファ
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Uniform Buffer"),
-            contents: bytemuck::cast_slice(&[uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &uniform_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &uniform_buffer, // バッファ全体
+                    offset: 0,
+                    size: wgpu::BufferSize::new(uniform_size as u64), // 1回で使えるサイズ
+                }),
             }],
             label: Some("uniform_bind_group"),
         });
@@ -314,33 +325,44 @@ impl State {
             });
 
         let mut tiles = vec![];
-        for x in 0..25 {
-            for y in 0..20 {
+        let mut draw_ranges = vec![];
+        let counts: [u32; 2] = [
+            textures[0].texture.width() / 32,
+            textures[1].texture.width() / 32,
+        ];
+        for y in 0..20 {
+            for x in 0..25 {
+                // 32x32を16x16に分割する
                 let tile = map_data[(y * map_width + x) as usize];
-                tiles.push(TileInstance {
-                    grid_pos: [x as u16, y as u16],
-                    tile_data: tile,
-                });
+                TileInstance::push_tile(&mut tiles, tile, x as i32, y as i32, counts);
             }
         }
+        let tile_count = tiles.len() as u32;
+        draw_ranges.push(Range {
+            start: 0,
+            end: tile_count,
+        });
         // 上に重ねる部分
         let one_layer_size = map_width * map_height;
-        for x in 0..25 {
-            for y in 0..20 {
+        for y in 0..20 {
+            for x in 0..25 {
                 let tile = map_data[(y * map_width + x + one_layer_size) as usize];
                 if tile & 0xFFFF == 0xFFFF {
                     continue;
                 }
-                tiles.push(TileInstance {
-                    grid_pos: [x as u16, y as u16],
-                    tile_data: tile,
-                });
+                TileInstance::push_tile(&mut tiles, tile, x as i32, y as i32, counts);
             }
         }
+        draw_ranges.push(Range {
+            start: tile_count,
+            end: tiles.len() as u32,
+        });
 
+        // 全体のタイル頂点
+        // これを層ごとに分配する
         let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Instance Buffer"),
-            size: (std::mem::size_of::<TileInstance>() * 2048) as wgpu::BufferAddress, // 最大サイズ (2048体分)
+            size: (std::mem::size_of::<TileInstance>() * 122880) as wgpu::BufferAddress, // 実際は縮小に制限を持たせて超えないようにする
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: true, // ← ここを true にすると作成と同時に書き込みを行うことが可能
         });
@@ -402,11 +424,15 @@ impl State {
             uniform_bind_group,
             instance_buffer,
             global_unoform_buffer: uniform_buffer,
-            position: [0, 0],
+            camera_pos: [400.0, 300.0],
+            scale: 1.0,
+            degress: 0.0,
             map_data,
             map_width,
             map_height,
+            map_count: 0,
             tiles,
+            draw_ranges,
             input: InputState::default(),
             window,
         })
@@ -430,71 +456,165 @@ impl State {
     }
 
     fn update(&mut self) {
+        if self.update_input() {
+            self.set_tile_data();
+        }
+
+        // 正射影行列を作成する、WGPUのNDCマッピング
+        // 1draw中に変化することはないのでcpu側で行う
+        let proj = glam::camera::rh::proj::directx::orthographic(0.0, 800.0, 600.0, 0.0, -1.0, 1.0);
+
+        let rotation = self.degress.to_radians();
+        // 右側から適用
+        // ・画面中央への配置
+        // ・スケーリング
+        // ・カメラ位置の逆オフセット
+        let view = glam::Mat4::from_translation(glam::Vec3::new(800.0 / 2.0, 600.0 / 2.0, 0.0))
+            * glam::Mat4::from_rotation_z(rotation)
+            * glam::Mat4::from_scale(glam::Vec3::new(self.scale, self.scale, 1.0))
+            * glam::Mat4::from_translation(glam::Vec3::new(
+                -self.camera_pos[0],
+                -self.camera_pos[1],
+                0.0,
+            ));
+        let view_proj = proj * view;
+
+        self.queue.write_buffer(
+            &self.global_unoform_buffer,
+            0,
+            bytemuck::bytes_of(&view_proj.to_cols_array_2d()),
+        );
+
+        // 回転を止める
+        let view_upper =
+            glam::Mat4::from_translation(glam::Vec3::new(800.0 / 2.0, 600.0 / 2.0, 0.0))
+                * glam::Mat4::from_scale(glam::Vec3::new(self.scale, self.scale, 1.0))
+                * glam::Mat4::from_translation(glam::Vec3::new(
+                    -self.camera_pos[0],
+                    -self.camera_pos[1],
+                    0.0,
+                ));
+        let view_proj_upper = proj * view_upper;
+        let alignment =
+            self.device.limits().min_uniform_buffer_offset_alignment as wgpu::BufferAddress;
+        self.queue.write_buffer(
+            &self.global_unoform_buffer,
+            alignment,
+            bytemuck::bytes_of(&view_proj_upper.to_cols_array_2d()),
+        );
+
+        let pattern: [u32; 2] = [self.map_count / 20, 0];
+        self.map_count = (self.map_count + 1) % 60;
+        if pattern[0] != self.map_count {
+            self.queue.write_buffer(
+                &self.global_unoform_buffer,
+                std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress
+                    + std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+                bytemuck::bytes_of(&pattern),
+            );
+        }
+    }
+
+    fn update_input(&mut self) -> bool {
+        if self.input.reset {
+            self.camera_pos = [400.0, 300.0];
+            self.scale = 1.0;
+            self.degress = 0.0;
+            return true;
+        }
+
         let speed = 8.0;
         let [dx, dy] = self.input.direction();
 
+        let mut dirty = false;
+
         if dx != 0.0 || dy != 0.0 {
-            self.position[0] += (dx * speed) as i32;
-            self.position[1] += (dy * speed) as i32;
-            let tile_offset: [i32; 2];
-            tile_offset = [-(self.position[0] % 32), -(self.position[1] % 32)];
-            //println!("tile_offset: {:?}", tile_offset);
-
-            let offset = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
-            self.queue.write_buffer(
-                &self.global_unoform_buffer,
-                offset,
-                bytemuck::cast_slice(&[tile_offset]),
-            );
-
-            self.set_tile_data();
+            self.camera_pos[0] += dx * speed;
+            self.camera_pos[1] += dy * speed;
+            dirty = true;
         }
+        // 値がずれないように２の負のべき乗単位で拡大縮小する
+        if self.input.plus {
+            self.scale += 0.125;
+            dirty = true;
+        } else if self.input.minus {
+            if self.scale > 0.125 {
+                self.scale -= 0.125;
+                self.scale = self.scale.max(0.125);
+                dirty = true;
+            }
+        }
+        let prev_degress = self.degress;
+        if self.input.rotation_l {
+            self.degress = (self.degress + 360.0 - 4.0) % 360.0;
+        } else if self.input.rotation_r {
+            self.degress = (self.degress + 4.0) % 360.0;
+        }
+        if prev_degress != self.degress && (prev_degress == 0.0 || self.degress == 0.0) {
+            dirty = true;
+        }
+
+        return dirty;
     }
 
     fn set_tile_data(&mut self) {
         let map_data = &self.map_data;
         let map_width = self.map_width as i32;
-        let start_x = self.position[0] / 32;
-        let start_y = self.position[1] / 32;
+        let map_height = self.map_height as i32;
         let tiles = &mut self.tiles;
+        let counts: [u32; 2] = [
+            self.textures[0].texture.width() / 32,
+            self.textures[1].texture.width() / 32,
+        ];
         tiles.clear();
-        for y in 0..21 {
-            for x in 0..26 {
-                if x + start_x >= map_width
-                    || y + start_y >= map_width
-                    || x + start_x < 0
-                    || y + start_y < 0
-                {
+
+        // 可視範囲の計算
+        let [half_w, half_h] = if self.degress != 0.0 {
+            // 簡易的に最大領域を確保しているだけだが同じ位置なら更新がないのでメリットもある
+            let half = ((400 * 400 + 300 * 300) as f32).sqrt() / self.scale;
+            [half, half]
+        } else {
+            [800.0 / 2.0 / self.scale, 600.0 / 2.0 / self.scale]
+        };
+
+        let view_left = self.camera_pos[0] - half_w;
+        let view_right = self.camera_pos[0] + half_w;
+        let view_top = self.camera_pos[1] - half_h;
+        let view_bottom = self.camera_pos[1] + half_h;
+
+        // 32.0px単位のタイルインデックス範囲
+        let start_x = (view_left / 32.0).floor() as i32;
+        let end_x = (view_right / 32.0).ceil() as i32;
+        let start_y = (view_top / 32.0).floor() as i32;
+        let end_y = (view_bottom / 32.0).ceil() as i32;
+
+        for y in start_y..=end_y {
+            for x in start_x..=end_x {
+                if x < 0 || x >= map_width || y < 0 || y >= map_height {
                     continue;
                 }
-                let tile = map_data[((y + start_y) * map_width + x + start_x) as usize];
-                tiles.push(TileInstance {
-                    grid_pos: [x as u16, y as u16],
-                    tile_data: tile,
-                });
+                let tile = map_data[(y * map_width + x) as usize];
+                TileInstance::push_tile(tiles, tile, x, y, counts);
             }
         }
+        let tile_count = tiles.len() as u32;
+        self.draw_ranges[0].start = 0;
+        self.draw_ranges[0].end = tile_count;
         let one_layer_size = (self.map_width * self.map_height) as usize;
-        for y in 0..21 {
-            for x in 0..26 {
-                if x + start_x >= map_width
-                    || y + start_y >= map_width
-                    || x + start_x < 0
-                    || y + start_y < 0
-                {
+        for y in start_y..=end_y {
+            for x in start_x..=end_x {
+                if x < 0 || x >= map_width || y < 0 || y >= map_height {
                     continue;
                 }
-                let tile =
-                    map_data[((y + start_y) * map_width + x + start_x) as usize + one_layer_size];
+                let tile = map_data[(y * map_width + x) as usize + one_layer_size];
                 if tile & 0xFFFF == 0xFFFF {
                     continue;
                 }
-                tiles.push(TileInstance {
-                    grid_pos: [x as u16, y as u16],
-                    tile_data: tile,
-                });
+                TileInstance::push_tile(tiles, tile, x, y, counts);
             }
         }
+        self.draw_ranges[1].start = tile_count;
+        self.draw_ranges[1].end = tiles.len() as u32;
         self.queue
             .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&tiles));
     }
@@ -551,11 +671,19 @@ impl State {
                 multiview_mask: None,
             });
 
+            let alignment = self.device.limits().min_uniform_buffer_offset_alignment as u32;
+
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.uniform_bind_group, &[0]);
             render_pass.set_bind_group(1, &self.texture_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.instance_buffer.slice(..));
-            render_pass.draw(0..4, 0..self.tiles.len() as u32);
+            // 層ごとにdrawを分ける
+            // タイルは1つのinstance_bufferにまとめる
+            // tileバッファは固定だからそれぞれの層にstartは固定で割り当ててendを変化させたほうがいい気がするな
+            // todo これはのちほど
+            render_pass.draw(0..4, self.draw_ranges[0].clone());
+            render_pass.set_bind_group(0, &self.uniform_bind_group, &[alignment]);
+            render_pass.draw(0..4, self.draw_ranges[1].clone());
         }
 
         self.queue.submit(iter::once(encoder.finish()));

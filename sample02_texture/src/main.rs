@@ -11,6 +11,7 @@ mod run_tilemap_multi_indices;
 mod run_uniform;
 mod sprite;
 mod texture;
+mod tile;
 
 fn main() -> anyhow::Result<()> {
     let default_run_id: i32 = 99;

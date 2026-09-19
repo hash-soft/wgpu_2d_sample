@@ -6,6 +6,11 @@ pub struct InputState {
     down: bool,
     left: bool,
     right: bool,
+    pub plus: bool,
+    pub minus: bool,
+    pub reset: bool,
+    pub rotation_l: bool,
+    pub rotation_r: bool,
 }
 
 impl InputState {
@@ -25,6 +30,26 @@ impl InputState {
             }
             KeyCode::ArrowRight | KeyCode::KeyD => {
                 self.right = is_pressed;
+                true
+            }
+            KeyCode::KeyQ => {
+                self.plus = is_pressed;
+                true
+            }
+            KeyCode::KeyE => {
+                self.minus = is_pressed;
+                true
+            }
+            KeyCode::Space => {
+                self.reset = is_pressed;
+                true
+            }
+            KeyCode::KeyL => {
+                self.rotation_l = is_pressed;
+                true
+            }
+            KeyCode::KeyR => {
+                self.rotation_r = is_pressed;
                 true
             }
             _ => false,

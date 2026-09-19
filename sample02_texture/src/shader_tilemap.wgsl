@@ -6,10 +6,9 @@ struct AtlasInfo {
 
 // 画面全体で共通のデータ（画面サイズなど）
 struct GlobalUniforms {
-    screen_size: vec2<f32>,
+    view_proj: mat4x4<f32>,
     tile_pixel_size: vec2<f32>,
-    offset: vec2<i32>,
-    animation: vec2<u32>,
+    pettern: vec2<u32>,
     atlases: array<AtlasInfo, 2>,
 }
 
@@ -17,8 +16,8 @@ struct GlobalUniforms {
 
 // タイルごとの個別データ（インスタンス入力）
 struct TileInstanceInput {
-    @location(0) grid_pos: vec2<u32>, // 画面上のインデックス位置 (x, y)
-    @location(1) tile_data: u32,      // タイルデータ
+    @location(0) world_pos: vec2<i32>, // ワールド座標 (x, y)
+    @location(1) tile_data: u32,       // タイルデータ
 }
 
 struct VertexOutput {
@@ -27,6 +26,7 @@ struct VertexOutput {
     @location(1) @interpolate(flat) texture_index: u32,
 }
 
+// もう一つ引数増やしてオフセットやアニメーションを別にできるようにするのもいいかもしれない
 @vertex
 fn vs_main(@builtin(vertex_index) in_vertex_index: u32, instance: TileInstanceInput) -> VertexOutput {
     // PrimitiveTopology::TriangleStrip を指定しているので4頂点で2つの三角形に構成される
@@ -38,11 +38,13 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32, instance: TileInstanceIn
         vec2<f32>(1.0, 1.0)
     );
 
-    let tex_index = instance.tile_data >> 16u;
+    let tex_index = instance.tile_data >> 28u;
+    let anim_index = (instance.tile_data >> 24) & 0xF;
+    let pattern = (instance.tile_data >> 21) & 0x7;
     let tile_id = instance.tile_data & 0xFFFFu;
     let atlas = global_uniforms.atlases[tex_index];
 
-    let atlas_x = tile_id % atlas.atlas_size.x;
+    let atlas_x = tile_id % atlas.atlas_size.x + anim_index * (global_uniforms.pettern[0] % pattern);
     let atlas_y = tile_id / atlas.atlas_size.x;
     let uv_offset = vec2<f32>(f32(atlas_x), f32(atlas_y)) * atlas.tile_uv_size;
 
@@ -51,16 +53,12 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32, instance: TileInstanceIn
     out.tex_coords = uv_offset + pos[in_vertex_index] * atlas.tile_uv_size;
 
     // ピクセル位置と画像サイズからスクリーン上のピクセル座標を計算
+    // 拡大縮小前の基本サイズでピクセル位置を計算
     let tile_size = global_uniforms.tile_pixel_size;
-    let pixel_pos = vec2<f32>(instance.grid_pos) * tile_size + pos[in_vertex_index] * tile_size + vec2<f32>(global_uniforms.offset);
+    let local_pixel_pos = vec2<f32>(instance.world_pos) * tile_size + pos[in_vertex_index] * tile_size;
 
-    // ピクセル座標 (0 ~ screen_size) を NDC 座標 (-1.0 ~ 1.0) に変換
-    // X: 0 -> -1.0, width -> 1.0
-    // Y: 0 -> 1.0 (上), height -> -1.0 (下)
-    let ndc_x = (pixel_pos.x / global_uniforms.screen_size.x) * 2.0 - 1.0;
-    let ndc_y = 1.0 - (pixel_pos.y / global_uniforms.screen_size.y) * 2.0;
-
-    out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
+    // View-Projection行列でクリップ座標系（NDC）へ一発変換
+    out.clip_position = global_uniforms.view_proj * vec4<f32>(local_pixel_pos, 0.0, 1.0);
     out.texture_index = tex_index;
 
     return out;
@@ -79,7 +77,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             return textureSample(t_texture0, s_sampler, in.tex_coords);
         }
         case 1: {
-            return textureSample(t_texture1, s_sampler, in.tex_coords);
+            // texture1だけ透明度を50%にしている
+            let tex_color = textureSample(t_texture1, s_sampler, in.tex_coords);
+            return vec4<f32>(tex_color.rgb, tex_color.a * 0.8);
         }
         default: {
             discard;
