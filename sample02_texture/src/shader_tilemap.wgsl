@@ -9,7 +9,7 @@ struct GlobalUniforms {
     view_proj: mat4x4<f32>,
     tile_pixel_size: vec2<f32>,
     pettern: vec2<u32>,
-    atlases: array<AtlasInfo, 2>,
+    atlases: array<AtlasInfo, 3>,
 }
 
 @group(0) @binding(0) var<uniform> global_uniforms: GlobalUniforms;
@@ -67,7 +67,8 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32, instance: TileInstanceIn
 // Fragment shader
 @group(1) @binding(0) var t_texture0: texture_2d<f32>;
 @group(1) @binding(1) var t_texture1: texture_2d<f32>;
-@group(1) @binding(2) var s_sampler: sampler;
+@group(1) @binding(2) var t_texture2: texture_2d<f32>;
+@group(2) @binding(0) var s_sampler: sampler;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -77,8 +78,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             return textureSample(t_texture0, s_sampler, in.tex_coords);
         }
         case 1: {
-            // texture1だけ透明度を50%にしている
-            let tex_color = textureSample(t_texture1, s_sampler, in.tex_coords);
+            return textureSample(t_texture1, s_sampler, in.tex_coords);
+        }
+        case 2: {
+            // texture2だけ透明度を50%にしている
+            let tex_color = textureSample(t_texture2, s_sampler, in.tex_coords);
             return vec4<f32>(tex_color.rgb, tex_color.a * 0.8);
         }
         default: {

@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TileInstance {
@@ -32,7 +34,7 @@ impl TileInstance {
         tile_data: u32,
         x: i32,
         y: i32,
-        counts: [u32; 2],
+        counts: [u32; 3],
     ) {
         let x = (x * 2) as i16;
         let y = (y * 2) as i16;
@@ -62,4 +64,11 @@ impl TileInstance {
             tile_data: upper | (tile_x + 1 + (tile_y + 1) * count_x2),
         });
     }
+}
+
+pub struct TileDrawGroup {
+    pub vertex_bind_offset: u32,  // 頂点bind_groupのoffset
+    pub slice_range: Range<u64>,  // instanceをsliceする範囲
+    pub draw_range: Range<u32>,   // drawで指定するinstanceの範囲
+    pub tiles: Vec<TileInstance>, // タイルの頂点のもとになるインスタンス
 }

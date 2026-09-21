@@ -1,17 +1,8 @@
-mod key;
-mod run_bind_group_multi_entry;
-mod run_bindless;
-mod run_introduction;
-mod run_multi_2d_array;
-mod run_multi_bind_group;
-mod run_sprite_tilemap;
-mod run_tilemap;
-mod run_tilemap_instanced;
-mod run_tilemap_multi_indices;
-mod run_uniform;
-mod sprite;
-mod texture;
-mod tile;
+use sample02_texture::{
+    run_bind_group_multi_entry, run_bindless, run_introduction, run_multi_2d_array,
+    run_multi_bind_group, run_sprite_tilemap, run_tilemap, run_tilemap_instanced,
+    run_tilemap_multi_indices, run_uniform,
+};
 
 fn main() -> anyhow::Result<()> {
     let default_run_id: i32 = 99;
