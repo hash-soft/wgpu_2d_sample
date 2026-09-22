@@ -67,7 +67,9 @@ impl TileInstance {
 }
 
 pub struct TileDrawGroup {
-    pub vertex_bind_offset: u32,  // 頂点bind_groupのoffset
+    pub vertex_bind_offset: u32, // 頂点bind_groupのoffset
+    pub fragment_bind_offset: u32,
+    pub opacity: f32,
     pub slice_range: Range<u64>,  // instanceをsliceする範囲
     pub draw_range: Range<u32>,   // drawで指定するinstanceの範囲
     pub tiles: Vec<TileInstance>, // タイルの頂点のもとになるインスタンス

@@ -28,18 +28,30 @@ use crate::{
 struct AtlasInfo {
     atlas_size: [u32; 2],
     tile_uv_size: [f32; 2],
+    tile_pixel_size: [f32; 2],
+    _padding: [f32; 2],
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct GlobalUniforms {
     view_proj: [[f32; 4]; 4],
-    tile_pixel_size: [f32; 2],
     pettern: [u32; 2],
+    _padding: [u32; 2],
     atlases: [AtlasInfo; 3],
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct FragmentUniforms {
+    opacity: f32,
+}
+
+const WORLD_INITIAL_POS: [f32; 2] = [7712.0, 8064.0];
+const TOWN_INITIAL_POS: [f32; 2] = [1600.0, 800.0];
+
 pub struct State {
+    target_logical_size: (f32, f32),
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -53,8 +65,11 @@ pub struct State {
     sampler_bind_group: wgpu::BindGroup,
     uniform_bind_group: wgpu::BindGroup,
     instance_buffer: wgpu::Buffer,
-    global_unoform_buffer: wgpu::Buffer,
+    vertex_uniform_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
+    fragment_uniform_buffer: wgpu::Buffer,
     camera_pos: [f32; 2],
+    camera_upper_pos: [f32; 2],
     scale: f32,
     degress: f32,
     map_data_list: Vec<MapData>,
@@ -66,6 +81,7 @@ pub struct State {
 
 impl State {
     async fn new(window: Arc<Window>) -> anyhow::Result<State> {
+        let target_logical_size = (800.0, 600.0);
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window.clone()).unwrap();
@@ -214,96 +230,183 @@ impl State {
 
         // ユニフォームデータ
         // シェーダーの共通データ
+        // 1番目はmap1、2番目以降はmap2
+        let half_tile1_w = map_data_list[0].tile_width / 2;
+        let half_tile1_h = map_data_list[0].tile_height / 2;
+        let half_tile2_w = map_data_list[1].tile_width / 2;
+        let half_tile2_h = map_data_list[1].tile_height / 2;
         let uniform: GlobalUniforms = GlobalUniforms {
             view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(), // 対角成分がすべて 1.0
-            tile_pixel_size: [16.0, 16.0],
             pettern: [0, 0],
+            _padding: [0, 0],
             atlases: [
                 AtlasInfo {
                     atlas_size: [
-                        textures[0].texture.width() / 16,
-                        textures[0].texture.height() / 16,
+                        textures[0].texture.width() / half_tile1_w,
+                        textures[0].texture.height() / half_tile1_h,
                     ],
                     tile_uv_size: [
                         16.0 / textures[0].texture.width() as f32,
                         16.0 / textures[0].texture.height() as f32,
                     ],
+                    tile_pixel_size: [half_tile1_w as f32, half_tile1_h as f32],
+                    _padding: [0.0, 0.0],
                 },
                 AtlasInfo {
                     atlas_size: [
-                        textures[1].texture.width() / 16,
-                        textures[1].texture.height() / 16,
+                        textures[1].texture.width() / half_tile2_w,
+                        textures[1].texture.height() / half_tile2_h,
                     ],
                     tile_uv_size: [
                         16.0 / textures[1].texture.width() as f32,
                         16.0 / textures[1].texture.height() as f32,
                     ],
+                    tile_pixel_size: [half_tile2_w as f32, half_tile2_h as f32],
+                    _padding: [0.0, 0.0],
                 },
                 AtlasInfo {
                     atlas_size: [
-                        textures[2].texture.width() / 16,
-                        textures[2].texture.height() / 16,
+                        textures[2].texture.width() / half_tile2_w,
+                        textures[2].texture.height() / half_tile2_h,
                     ],
                     tile_uv_size: [
                         16.0 / textures[2].texture.width() as f32,
                         16.0 / textures[2].texture.height() as f32,
                     ],
+                    tile_pixel_size: [half_tile2_w as f32, half_tile2_h as f32],
+                    _padding: [0.0, 0.0],
                 },
             ],
         };
 
         // デバイスのアライメント制限を取得
         let alignment = device.limits().min_uniform_buffer_offset_alignment as usize;
-        let uniform_size = std::mem::size_of::<GlobalUniforms>();
+        let vertex_uniform_size = std::mem::size_of::<GlobalUniforms>();
         // アライメントの倍数にパディングを計算
         // ２の累乗の最上位以外を落とす
-        let aligned_size = (uniform_size + alignment - 1) & !(alignment - 1);
+        let vertex_aligned_size = (vertex_uniform_size + alignment - 1) & !(alignment - 1);
 
+        let fragment_uniform_size = std::mem::size_of::<FragmentUniforms>();
+        let fragment_aligned_size = (fragment_uniform_size + alignment - 1) & !(alignment - 1);
+
+        let instance_size_1 = (std::mem::size_of::<TileInstance>() * 368640) as u64;
+        let mut tile_draw_groups = Vec::with_capacity(2);
+        tile_draw_groups.push(TileDrawGroup {
+            vertex_bind_offset: 0,
+            fragment_bind_offset: 0,
+            opacity: map_data_list[0].opacity,
+            slice_range: 0..instance_size_1, // 最大で使うタイル数を決める必要がある
+            draw_range: 0..0,
+            tiles: vec![],
+        });
+
+        // 計算上縦横それぞれ2チップ余裕を持たせる必要がある
+        // ２レイヤーなので * 2
+        let instance_size_2 = (std::mem::size_of::<TileInstance>() * 2376 * 2) as u64;
+        tile_draw_groups.push(TileDrawGroup {
+            vertex_bind_offset: vertex_aligned_size as u32,
+            fragment_bind_offset: fragment_aligned_size as u32,
+            opacity: map_data_list[1].opacity,
+            slice_range: instance_size_1..instance_size_1 + instance_size_2,
+            draw_range: 0..0,
+            tiles: vec![],
+        });
+
+        let uniform_count = tile_draw_groups.len();
         // uniformバッファ
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        let vertex_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Dynamic Uniform Buffer"),
-            size: (aligned_size * 2) as wgpu::BufferAddress,
+            size: (vertex_aligned_size * uniform_count) as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: true,
         });
         {
-            let mut buffer_view = uniform_buffer.get_mapped_range_mut(..)?;
+            let mut buffer_view = vertex_uniform_buffer.get_mapped_range_mut(..)?;
 
             buffer_view
-                .slice(0..uniform_size)
+                .slice(0..vertex_uniform_size)
                 .copy_from_slice(bytemuck::bytes_of(&uniform));
             buffer_view
-                .slice(aligned_size..aligned_size + uniform_size)
+                .slice(vertex_aligned_size..vertex_aligned_size + vertex_uniform_size)
                 .copy_from_slice(bytemuck::bytes_of(&uniform));
         }
-        uniform_buffer.unmap();
+        vertex_uniform_buffer.unmap();
+
+        let fragment_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Dynamic Uniform Buffer"),
+            size: (fragment_aligned_size * uniform_count) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: true,
+        });
+        {
+            let mut buffer_view = fragment_uniform_buffer.get_mapped_range_mut(..)?;
+
+            for (i, draw_group) in tile_draw_groups.iter().enumerate() {
+                let fragment_uniforms = FragmentUniforms {
+                    opacity: draw_group.opacity,
+                };
+                buffer_view
+                    .slice(
+                        fragment_aligned_size * i
+                            ..fragment_aligned_size * i + fragment_uniform_size,
+                    )
+                    .copy_from_slice(bytemuck::bytes_of(&fragment_uniforms));
+            }
+        }
+        fragment_uniform_buffer.unmap();
 
         // ユニフォームグループレイアウト
         let uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX, // 頂点シェーダーで参照するため
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: true,
-                        min_binding_size: Some(wgpu::BufferSize::new(uniform_size as u64).unwrap()),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX, // 頂点シェーダーで参照するため
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: true,
+                            min_binding_size: Some(
+                                wgpu::BufferSize::new(vertex_uniform_size as u64).unwrap(),
+                            ),
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: true,
+                            min_binding_size: Some(
+                                wgpu::BufferSize::new(fragment_uniform_size as u64).unwrap(),
+                            ),
+                        },
+                        count: None,
+                    },
+                ],
                 label: Some("uniform_bind_group_layout"),
             });
 
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &uniform_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &uniform_buffer, // バッファ全体
-                    offset: 0,
-                    size: wgpu::BufferSize::new(uniform_size as u64), // 1回で使えるサイズ
-                }),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &vertex_uniform_buffer, // バッファ全体
+                        offset: 0,
+                        size: wgpu::BufferSize::new(vertex_uniform_size as u64), // 1回で使えるサイズ
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &fragment_uniform_buffer, // バッファ全体
+                        offset: 0,
+                        size: wgpu::BufferSize::new(fragment_uniform_size as u64),
+                    }),
+                },
+            ],
             label: Some("uniform_bind_group"),
         });
 
@@ -323,25 +426,6 @@ impl State {
                 ],
                 immediate_size: 0,
             });
-
-        let instance_size_1 = (std::mem::size_of::<TileInstance>() * 368640) as u64;
-        let mut tile_draw_groups = Vec::with_capacity(2);
-        tile_draw_groups.push(TileDrawGroup {
-            vertex_bind_offset: 0,
-            slice_range: 0..instance_size_1, // 最大で使うタイル数を決める必要がある
-            draw_range: 0..0,
-            tiles: vec![],
-        });
-
-        // 計算上縦横それぞれ2チップ余裕を持たせる必要がある
-        // ２レイヤーなので * 2
-        let instance_size_2 = (std::mem::size_of::<TileInstance>() * 2376 * 2) as u64;
-        tile_draw_groups.push(TileDrawGroup {
-            vertex_bind_offset: aligned_size as u32,
-            slice_range: instance_size_1..instance_size_1 + instance_size_2,
-            draw_range: 0..0,
-            tiles: vec![],
-        });
 
         // 全体のタイル頂点
         // これを層ごとに分配する
@@ -387,6 +471,7 @@ impl State {
         });
 
         Ok(Self {
+            target_logical_size,
             surface,
             device,
             queue,
@@ -398,8 +483,10 @@ impl State {
             sampler_bind_group,
             uniform_bind_group,
             instance_buffer,
-            global_unoform_buffer: uniform_buffer,
-            camera_pos: [400.0, 300.0],
+            vertex_uniform_buffer,
+            fragment_uniform_buffer,
+            camera_pos: WORLD_INITIAL_POS,
+            camera_upper_pos: TOWN_INITIAL_POS,
             scale: 1.0,
             degress: 0.0,
             map_data_list,
@@ -442,25 +529,36 @@ impl State {
 
         // 正射影行列を作成する、WGPUのNDCマッピング
         // 1draw中に変化することはないのでcpu側で行う
-        let proj = glam::camera::rh::proj::directx::orthographic(0.0, 800.0, 600.0, 0.0, -1.0, 1.0);
+        let proj = glam::camera::rh::proj::directx::orthographic(
+            0.0,
+            self.target_logical_size.0,
+            self.target_logical_size.1,
+            0.0,
+            -1.0,
+            1.0,
+        );
+
+        let half_logical_w = self.target_logical_size.0 / 2.0;
+        let half_logical_h = self.target_logical_size.1 / 2.0;
 
         let rotation = self.degress.to_radians();
         // 右側から適用
         // ・画面中央への配置
         // ・スケーリング
         // ・カメラ位置の逆オフセット
-        let view = glam::Mat4::from_translation(glam::Vec3::new(800.0 / 2.0, 600.0 / 2.0, 0.0))
-            * glam::Mat4::from_rotation_z(rotation)
-            * glam::Mat4::from_scale(glam::Vec3::new(self.scale, self.scale, 1.0))
-            * glam::Mat4::from_translation(glam::Vec3::new(
-                -self.camera_pos[0],
-                -self.camera_pos[1],
-                0.0,
-            ));
+        let view =
+            glam::Mat4::from_translation(glam::Vec3::new(half_logical_w, half_logical_h, 0.0))
+                * glam::Mat4::from_rotation_z(rotation)
+                * glam::Mat4::from_scale(glam::Vec3::new(self.scale, self.scale, 1.0))
+                * glam::Mat4::from_translation(glam::Vec3::new(
+                    -self.camera_pos[0],
+                    -self.camera_pos[1],
+                    0.0,
+                ));
         let view_proj = proj * view;
 
         self.queue.write_buffer(
-            &self.global_unoform_buffer,
+            &self.vertex_uniform_buffer,
             self.tile_draw_groups[0].vertex_bind_offset as wgpu::BufferAddress,
             bytemuck::bytes_of(&view_proj.to_cols_array_2d()),
         );
@@ -468,15 +566,15 @@ impl State {
         if self.tile_draw_groups.len() > 1 {
             // 拡大縮小と回転を止める
             let view_upper =
-                glam::Mat4::from_translation(glam::Vec3::new(800.0 / 2.0, 600.0 / 2.0, 0.0))
+                glam::Mat4::from_translation(glam::Vec3::new(half_logical_w, half_logical_h, 0.0))
                     * glam::Mat4::from_translation(glam::Vec3::new(
-                        -self.camera_pos[0],
-                        -self.camera_pos[1],
+                        -self.camera_upper_pos[0],
+                        -self.camera_upper_pos[1],
                         0.0,
                     ));
             let view_proj_upper = proj * view_upper;
             self.queue.write_buffer(
-                &self.global_unoform_buffer,
+                &self.vertex_uniform_buffer,
                 self.tile_draw_groups[1].vertex_bind_offset as wgpu::BufferAddress,
                 bytemuck::bytes_of(&view_proj_upper.to_cols_array_2d()),
             );
@@ -487,10 +585,8 @@ impl State {
         if pattern[0] != self.map_count {
             for draw_group in self.tile_draw_groups.iter() {
                 self.queue.write_buffer(
-                    &self.global_unoform_buffer,
-                    (std::mem::size_of::<[[f32; 4]; 4]>()
-                        + std::mem::size_of::<[f32; 2]>()
-                        + draw_group.vertex_bind_offset as usize)
+                    &self.vertex_uniform_buffer,
+                    (std::mem::size_of::<[[f32; 4]; 4]>() + draw_group.vertex_bind_offset as usize)
                         as wgpu::BufferAddress,
                     bytemuck::bytes_of(&pattern),
                 );
@@ -500,7 +596,9 @@ impl State {
 
     fn update_input(&mut self) -> bool {
         if self.input.reset {
-            self.camera_pos = [400.0, 300.0];
+            // マップの左上の中心に表示が[0.0, 0.0]となる
+            self.camera_pos = WORLD_INITIAL_POS;
+            self.camera_upper_pos = TOWN_INITIAL_POS;
             self.scale = 1.0;
             self.degress = 0.0;
             return true;
@@ -514,8 +612,11 @@ impl State {
         if dx != 0.0 || dy != 0.0 {
             self.camera_pos[0] += dx * speed;
             self.camera_pos[1] += dy * speed;
+            self.camera_upper_pos[0] += dx * 2.0;
+            self.camera_upper_pos[1] += dy * 2.0;
             dirty = true;
         }
+
         // 値がずれないように２の負のべき乗単位で拡大縮小する
         if self.input.plus {
             self.scale += 0.0625;
@@ -550,9 +651,9 @@ impl State {
         let map_data = &self.map_data_list[index];
         let draw_group = &mut self.tile_draw_groups[index];
         let data = &map_data.data;
-        // 決め打ちでlayer0のサイズを使う
-        let map_width = map_data.layers[0].width as i32;
-        let map_height = map_data.layers[0].height as i32;
+        // layerのサイズは実際のタイルの数
+        let map_width = map_data.width as i32;
+        let map_height = map_data.height as i32;
         let tiles = &mut draw_group.tiles;
         // とりあえず全テクスチャ
         let counts: [u32; 3] = [
@@ -562,32 +663,45 @@ impl State {
         ];
         tiles.clear();
 
+        let half_logical_w = self.target_logical_size.0 / 2.0;
+        let half_logical_h = self.target_logical_size.1 / 2.0;
         // 可視範囲の計算
         // index = 1 は拡大縮小回転をしない
         let [half_w, half_h] = if index == 1 {
-            [800.0 / 2.0, 600.0 / 2.0]
+            [half_logical_w, half_logical_h]
         } else {
             if self.degress != 0.0 {
                 // 簡易的に最大領域を確保しているだけだが同じ位置なら更新がないのでメリットもある
-                let half = ((400 * 400 + 300 * 300) as f32).sqrt() / self.scale;
+                let half = ((half_logical_w * half_logical_w + half_logical_h * half_logical_h)
+                    as f32)
+                    .sqrt()
+                    / self.scale;
                 [half, half]
             } else {
-                [800.0 / 2.0 / self.scale, 600.0 / 2.0 / self.scale]
+                [half_logical_w / self.scale, half_logical_h / self.scale]
             }
         };
 
-        let view_left = self.camera_pos[0] - half_w;
-        let view_right = self.camera_pos[0] + half_w;
-        let view_top = self.camera_pos[1] - half_h;
-        let view_bottom = self.camera_pos[1] + half_h;
+        let (camera_x, camera_y) = if index == 1 {
+            (self.camera_upper_pos[0], self.camera_upper_pos[1])
+        } else {
+            (self.camera_pos[0], self.camera_pos[1])
+        };
 
+        let view_left = camera_x - half_w;
+        let view_right = camera_x + half_w;
+        let view_top = camera_y - half_h;
+        let view_bottom = camera_y + half_h;
+
+        let tile_width_f = map_data.tile_width as f32;
+        let tile_height_f = map_data.tile_height as f32;
         // 32.0px単位のタイルインデックス範囲
         // todo この計算だと余分に1チップ多くなることがあるのでうまくできないか見直す
         // 表示の最大範囲を求めておいて超えていたら補正するとなど
-        let start_x = (view_left / 32.0).floor() as i32;
-        let end_x = (view_right / 32.0).ceil() as i32;
-        let start_y = (view_top / 32.0).floor() as i32;
-        let end_y = (view_bottom / 32.0).ceil() as i32;
+        let start_x = (view_left / tile_width_f).floor() as i32;
+        let end_x = (view_right / tile_width_f).ceil() as i32;
+        let start_y = (view_top / tile_height_f).floor() as i32;
+        let end_y = (view_bottom / tile_height_f).ceil() as i32;
 
         for layer in &map_data.layers {
             for y in start_y..=end_y {
@@ -676,7 +790,10 @@ impl State {
                 render_pass.set_bind_group(
                     0,
                     &self.uniform_bind_group,
-                    &[tile_draw_group.vertex_bind_offset],
+                    &[
+                        tile_draw_group.vertex_bind_offset,
+                        tile_draw_group.fragment_bind_offset,
+                    ],
                 );
                 render_pass.set_vertex_buffer(
                     0,

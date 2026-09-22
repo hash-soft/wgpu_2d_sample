@@ -13,6 +13,8 @@ pub struct TiledMap {
 #[derive(Deserialize, Debug)]
 pub struct Layer {
     pub data: Option<Vec<u32>>,
+    pub x: u32,
+    pub y: u32,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub opacity: f32,

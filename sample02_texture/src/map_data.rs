@@ -6,20 +6,33 @@ use crate::tiled_map::TiledMap;
 pub struct MapData {
     pub tile_width: u32,
     pub tile_height: u32,
+    pub width: u32,
+    pub height: u32,
+    pub opacity: f32,
     pub data: Vec<u32>,
     pub layers: Vec<MapLayer>,
 }
 
 #[derive(Debug)]
 pub struct MapLayer {
+    // この4つはサンプルには面倒なので使わない
+    #[allow(dead_code)]
+    pub x: u32,
+    #[allow(dead_code)]
+    pub y: u32,
+    #[allow(dead_code)]
     pub width: u32,
+    #[allow(dead_code)]
     pub height: u32,
     pub start_index: u32,
 }
 
 struct SliceLayer<'a> {
+    pub x: u32,
+    pub y: u32,
     pub width: u32,
     pub height: u32,
+    pub opacity: f32,
     pub data: &'a [u32],
 }
 
@@ -40,8 +53,11 @@ impl MapData {
                 continue;
             }
             slice_layers.push(SliceLayer {
+                x: layer.x,
+                y: layer.y,
                 width,
                 height,
+                opacity: layer.opacity,
                 data,
             });
             data_count += width * height;
@@ -68,6 +84,7 @@ impl MapData {
         let mut data = vec![0; data_count as usize];
         let mut layers = Vec::with_capacity(slice_layers.len());
         let mut start_index = 0;
+        let mut opacity = 1.0;
         for layer in &slice_layers {
             for y in 0..layer.height {
                 for x in 0..layer.width {
@@ -80,16 +97,25 @@ impl MapData {
                 }
             }
             layers.push(MapLayer {
+                x: layer.x,
+                y: layer.y,
                 width: layer.width,
                 height: layer.height,
                 start_index,
             });
             start_index += layer.width * layer.height;
+            if layer.opacity < opacity {
+                // 低いほうに合わせる
+                opacity = layer.opacity;
+            }
         }
 
         Some(MapData {
             tile_width: tiled_map.tilewidth,
             tile_height: tiled_map.tileheight,
+            width: tiled_map.width,
+            height: tiled_map.height,
+            opacity,
             data,
             layers,
         })
