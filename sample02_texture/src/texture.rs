@@ -17,6 +17,15 @@ impl Texture {
         )
     }
 
+    /// 最大テクスチャ数
+    /// request_max_sampled_texturesと同じだが、名前を変えるとほかのファイルを変更する必要があるので追加で対応する
+    pub fn request_max_textures(limits: &Limits, limit_texture_count: u32) -> u32 {
+        std::cmp::min(
+            limit_texture_count,
+            limits.max_sampled_textures_per_shader_stage,
+        )
+    }
+
     /// テクスチャ1つに対して1つのサンプラーは不要なので使いまわせるようにする
     pub fn create_sampler(device: &wgpu::Device) -> wgpu::Sampler {
         device.create_sampler(&wgpu::SamplerDescriptor {
@@ -223,6 +232,7 @@ pub struct DynamicShader {
 
 impl DynamicShader {
     /// テクスチャ1つに対して1つのサンプラーは不要なので使いまわせるようにする
+    #[allow(dead_code)]
     pub fn create_multiple_texture(max_sampled_textures: u32) -> Self {
         // let max_allowed = (limits.max_sampled_textures_per_shader_stage as usize).saturating_sub(1); // サンプラー分を1つ引く例
         // // 最大32枚

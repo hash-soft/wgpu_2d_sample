@@ -171,9 +171,9 @@ impl State {
 
         println!("=======================");
 
-        let dragon_bytes: &[u8] = include_bytes!("pipo-enemy021.png");
-        let oni_bytes: &[u8] = include_bytes!("pipo-enemy019.png");
-        let purin_bytes: &[u8] = include_bytes!("cm_001.png");
+        let dragon_bytes: &[u8] = include_bytes!("image/characters/pipo-enemy021.png");
+        let oni_bytes: &[u8] = include_bytes!("image/characters/pipo-enemy019.png");
+        let purin_bytes: &[u8] = include_bytes!("image/characters/cm_001.png");
         let array_bytes = vec![dragon_bytes, oni_bytes, purin_bytes];
 
         let mut textures = Vec::with_capacity(array_bytes.len());
@@ -344,6 +344,7 @@ impl State {
                 uv_offset: [0.0, 0.0],
                 uv_size: [1.0, 1.0],
                 texture_index: 0,
+                opacity: 1.0,
             },
             // スプライト 2（鬼）
             SpriteInstance {
@@ -355,6 +356,7 @@ impl State {
                 uv_offset: [0.0, 0.0],
                 uv_size: [1.0, 1.0],
                 texture_index: 1,
+                opacity: 1.0,
             },
             // スプライト 2（へなへなプリン）
             SpriteInstance {
@@ -366,6 +368,7 @@ impl State {
                 uv_offset: [0.0, 0.0],
                 uv_size: [1.0, 1.0],
                 texture_index: 2,
+                opacity: 1.0,
             },
         ];
 

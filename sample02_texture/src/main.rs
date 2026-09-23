@@ -54,6 +54,6 @@ fn main() -> anyhow::Result<()> {
         7 => run_tilemap::run(),
         8 => run_tilemap_multi_indices::run(),
         9 => run_tilemap_instanced::run(),
-        _ => run_tilemap::run(),
+        _ => run_bind_group_multi_entry::run(),
     }
 }

@@ -160,7 +160,7 @@ impl State {
         println!("Surface Config:\n {:#?}", config);
         println!("=======================");
 
-        let diffuse_bytes = include_bytes!("pipo-enemy021.png");
+        let diffuse_bytes = include_bytes!("image/characters/pipo-enemy021.png");
         let diffuse_texture =
             Texture::from_bytes(&device, &queue, diffuse_bytes, "enemy021").unwrap();
         let sampler = Texture::create_sampler(&device);

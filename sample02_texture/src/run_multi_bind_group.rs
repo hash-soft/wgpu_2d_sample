@@ -170,10 +170,10 @@ impl State {
         println!("=======================");
 
         let mut textures = Vec::with_capacity(2);
-        let diffuse_bytes = include_bytes!("pipo-enemy021.png");
+        let diffuse_bytes = include_bytes!("image/characters/pipo-enemy021.png");
         let diffuse_texture =
             Texture::from_bytes(&device, &queue, diffuse_bytes, "enemy021").unwrap();
-        let e2_bytes = include_bytes!("cm_001.png");
+        let e2_bytes = include_bytes!("image/characters/cm_001.png");
         let texture_e2 = Texture::from_bytes(&device, &queue, e2_bytes, "cm_001").unwrap();
         textures.push(diffuse_texture);
         textures.push(texture_e2);
@@ -353,6 +353,7 @@ impl State {
                 uv_offset: [0.0, 0.0],
                 uv_size: [1.0, 1.0],
                 texture_index: 0,
+                opacity: 1.0,
             },
             // スプライト 2（へなへなプリン）
             SpriteInstance {
@@ -364,6 +365,7 @@ impl State {
                 uv_offset: [0.0, 0.0],
                 uv_size: [1.0, 1.0],
                 texture_index: 0,
+                opacity: 1.0,
             },
         ];
 
