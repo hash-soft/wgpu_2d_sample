@@ -95,7 +95,7 @@ impl State {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
+            backends: wgpu::Backends::DX12,
             flags: Default::default(),
             memory_budget_thresholds: Default::default(),
             backend_options: Default::default(),
@@ -154,7 +154,7 @@ impl State {
             format: surface_format,                        // surface_capsから決定したフォーマット
             width: size.width,                             // ウィンドウ内部の幅
             height: size.height,                           // ウィンドウ内部の高さ
-            present_mode: surface_caps.present_modes[1], // 垂直同期などの表示モード（利用可能な最初のモード）
+            present_mode: wgpu::PresentMode::default(),    // 垂直同期
             alpha_mode: surface_caps.alpha_modes[0], // ウィンドウ背後との合成モード（利用可能な最初のモード）
             view_formats: vec![],                    // ビューフォーマットの追加設定（空）
             desired_maximum_frame_latency: 2,        // 最大フレームレイテンシ
@@ -167,7 +167,9 @@ impl State {
         // シェーダの読み込み
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shader_polygon_vertex_index.wgsl").into(),
+            ),
         });
 
         // パイプラインの作成
@@ -222,7 +224,9 @@ impl State {
 
         let shader_dyn = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Dyn Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader_dyn.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shader_polygon_vertex_index_color.wgsl").into(),
+            ),
         });
 
         // 位置は固定、色は位置によって変化する三角形パイプライン
@@ -268,7 +272,9 @@ impl State {
 
         let shader_buffer = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Dyn Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader_buffer.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shader_polygon_index_buffer.wgsl").into(),
+            ),
         });
 
         // Vertexを使用したパイプライン

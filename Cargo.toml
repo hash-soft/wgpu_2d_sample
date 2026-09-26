@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 
 [workspace]
-members = ["sample01_polygon", "sample02_texture", "sample03_viewport"]
+members = ["sample01_minimal", "sample02_texture", "sample03_viewport"]
