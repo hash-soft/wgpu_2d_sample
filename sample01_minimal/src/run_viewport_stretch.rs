@@ -9,7 +9,7 @@ use winit::{
     window::Window,
 };
 
-use crate::{key::InputState, sprite::SpriteInstance, texture};
+use crate::{sub::key::InputState, sub::sprite::SpriteInstance, sub::texture};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -145,7 +145,7 @@ impl State {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
+            backends: wgpu::Backends::DX12,
             flags: Default::default(),
             memory_budget_thresholds: Default::default(),
             backend_options: Default::default(),
@@ -204,7 +204,7 @@ impl State {
             format: surface_format,                        // surface_capsから決定したフォーマット
             width: size.width,                             // ウィンドウ内部の幅
             height: size.height,                           // ウィンドウ内部の高さ
-            present_mode: surface_caps.present_modes[0], // 垂直同期などの表示モード（利用可能な最初のモード）
+            present_mode: wgpu::PresentMode::default(),    // 垂直同期
             alpha_mode: surface_caps.alpha_modes[0], // ウィンドウ背後との合成モード（利用可能な最初のモード）
             view_formats: vec![],                    // ビューフォーマットの追加設定（空）
             desired_maximum_frame_latency: 2,        // 最大フレームレイテンシ
@@ -214,7 +214,7 @@ impl State {
         println!("Surface Config:\n {:#?}", config);
         println!("=======================");
 
-        let diffuse_bytes = include_bytes!("pipo-enemy021.png");
+        let diffuse_bytes = include_bytes!("image/characters/pipo-enemy021.png");
         let diffuse_texture =
             texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "enemy021").unwrap();
 
@@ -287,7 +287,7 @@ impl State {
 
         let uniform_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Uniform Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader_uniform.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader_texture_uniform.wgsl").into()),
         });
 
         // Uniformを使用したパイプライン
@@ -400,7 +400,9 @@ impl State {
         // 矩形バッファ
         let shader_buffer = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Dyn Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader_buffer.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shader_polygon_index_buffer.wgsl").into(),
+            ),
         });
 
         let render_buffer_pipeline_layout =

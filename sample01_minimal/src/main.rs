@@ -1,4 +1,4 @@
-use sample01_minimal::run_polygon_simple;
+use sample01_minimal::{run_polygon_simple, run_viewport, run_viewport_stretch};
 
 fn main() -> anyhow::Result<()> {
     let default_run_id: i32 = 0;
@@ -13,7 +13,8 @@ fn main() -> anyhow::Result<()> {
                 // 2. 特定の文字列の場合の判定
                 match arg.as_str() {
                     "polygon_simple" => 0,
-                    //"strech" => 1, // 作ってはみたもののぼやけて使い物にならない、オフスクリーンに描画して転送する必要がある
+                    "viewport" => 1,
+                    "viewport_strech" => 1, // 作ってはみたもののぼやけて使い物にならない、オフスクリーンに描画して転送する必要がある
                     // 3. それ以外（数値でも特定の文字列でもない）ならデフォルト値
                     _ => default_run_id,
                 }
@@ -25,6 +26,8 @@ fn main() -> anyhow::Result<()> {
 
     match run_id {
         0 => run_polygon_simple::run(),
+        1 => run_viewport::run(),
+        2 => run_viewport_stretch::run(),
         _ => run_polygon_simple::run(),
     }
 }
