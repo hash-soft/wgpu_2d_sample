@@ -1,8 +1,10 @@
 /// この方法をベースに拡張していく
 /// todo
-/// ・表示順にソート
-/// ・色合成
-/// ・フィルター
+/// ・フィルター それぞれ組み込んでみて負荷を確認する
+/// ・組み込む前にサンプルの場所を移動 > minimal
+/// ・> 色合成
+/// ・> ノイズ
+/// ・> ブラー
 /// memo
 /// ・ブレンド方法を変えるにはレンダーパイプライン変えないといけないからdrawを分割する必要がある
 ///
@@ -21,8 +23,8 @@ use crate::{key::InputState, sprite::SpriteCharacterInstance, texture::Texture};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Uniforms {
-    screen_size: [f32; 2],
+struct VertexUniforms {
+    view_proj: [[f32; 4]; 4],
 }
 
 pub struct State {
@@ -42,13 +44,15 @@ pub struct State {
     sampler: wgpu::Sampler,
     texture_bind_group: wgpu::BindGroup,
     sampler_bind_group: wgpu::BindGroup,
-    #[allow(dead_code)]
-    uniform_buffer: wgpu::Buffer, // 保持しているだけ
-    uniform_bind_group: wgpu::BindGroup,
+    uniform_buffers: [wgpu::Buffer; 2],
+    uniform_bind_groups: [wgpu::BindGroup; 2],
     instance_buffer: wgpu::Buffer,
     sprites: Vec<SpriteCharacterInstance>,
     direction: u32,
     pattern_count: u32,
+    camera_pos: [f32; 2],
+    scale: f32,
+    degress: f32,
     input: InputState,
     window: Arc<Window>,
 }
@@ -301,26 +305,57 @@ impl State {
             });
 
         // ユニフォームデータ
-        let uniform: Uniforms = Uniforms {
-            screen_size: [target_logical_size.0, target_logical_size.1],
+        let uniform: VertexUniforms = VertexUniforms {
+            view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(), // 単位行列で初期化
+        };
+
+        let uniform0 = VertexUniforms {
+            view_proj: glam::camera::rh::proj::directx::orthographic(
+                0.0,
+                target_logical_size.0,
+                target_logical_size.1,
+                0.0,
+                -1.0,
+                1.0,
+            )
+            .to_cols_array_2d(),
         };
 
         // uniformバッファ
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Uniform Buffer"),
-            contents: bytemuck::cast_slice(&[uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniform_buffers = [
+            // 0番目は更新しない
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Uniform Buffer 0"),
+                contents: bytemuck::cast_slice(&[uniform0]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            }),
+            // 初期化時は1番目と同じだが更新がかかる
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Uniform Buffer 1"),
+                contents: bytemuck::cast_slice(&[uniform]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            }),
+        ];
 
         // uniformバインドグループ
-        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &uniform_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
-            label: Some("uniform_bind_group"),
-        });
+        let uniform_bind_groups = [
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &uniform_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffers[0].as_entire_binding(),
+                }],
+                label: Some("uniform_bind_group 0"),
+            }),
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &uniform_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffers[1].as_entire_binding(),
+                }],
+                label: Some("uniform_bind_group 1"),
+            }),
+        ];
 
         let sprites = vec![
             // スプライト 0（キャラセット1枚目 / 矢印キーで移動・左上原点回転）
@@ -398,6 +433,21 @@ impl State {
                 rotation: 0.0,
                 pivot: [1.0, 0.5], // 右端中央を軸
             },
+            // スプライト 5（キャラセット1枚目 / マップの影響をうけないやつ）
+            SpriteCharacterInstance {
+                position: [target_logical_size.0 / 2.0, target_logical_size.1 / 2.0],
+                size: [32.0, 32.0],
+                uv_offset: [96.0 / textures[3].texture.width() as f32, 0.0],
+                uv_size: [
+                    32.0 / textures[3].texture.width() as f32,
+                    32.0 / textures[3].texture.height() as f32,
+                ],
+                texture_index: 3,
+                opacity: 1.0,
+                scale: [1.0, 1.0],
+                rotation: 0.0,
+                pivot: [0.0, 0.0], // 左上原点で回転
+            },
         ];
 
         // instanceバッファ
@@ -419,12 +469,15 @@ impl State {
             texture_bind_group,
             sampler_bind_group,
             render_pipeline: uniform_render_pipeline,
-            uniform_buffer,
-            uniform_bind_group,
+            uniform_buffers,
+            uniform_bind_groups,
             instance_buffer,
             sprites,
             direction: 0,
             pattern_count: 0,
+            camera_pos: [target_logical_size.0 / 2.0, target_logical_size.1 / 2.0],
+            scale: 1.0,
+            degress: 0.0,
             input: InputState::default(),
             window,
         })
@@ -464,29 +517,9 @@ impl State {
     }
 
     fn update(&mut self) {
-        let speed = 2.0;
-        let [dx, dy] = self.input.direction();
-
+        self.update_input();
         self.pattern_count = (self.pattern_count + 1) % 60;
-        if dx != 0.0 || dy != 0.0 {
-            // スプライト 0: 矢印キーで移動
-            self.sprites[0].position[0] += dx * speed;
-            self.sprites[0].position[1] += dy * speed;
-            // スプライトの方向やアニメーションなどの座標はcpu側で設定する
-            self.direction = if dx > 0.0 {
-                2
-            } else if dx < 0.0 {
-                1
-            } else if dy > 0.0 {
-                0
-            } else if dy < 0.0 {
-                3
-            } else {
-                self.direction
-            };
-            self.sprites[0].uv_offset[1] =
-                32.0 * self.direction as f32 / self.textures[3].texture.height() as f32;
-        }
+
         let pattern = (self.pattern_count / 15) as usize;
         let pattern_table: [u32; 4] = [1, 2, 1, 0];
         self.sprites[0].uv_offset[0] =
@@ -504,12 +537,104 @@ impl State {
             self.sprites[4].rotation -= std::f32::consts::TAU;
         }
 
+        let mut sorted_sprites: Vec<&SpriteCharacterInstance> = self.sprites.iter().collect();
+        // 高さの順のソート、回転は考慮しない
+        // 最後の要素は対象外（0から数えているので6個ある）
+        sorted_sprites[0..5].sort_by(|a, b| a.position[1].partial_cmp(&b.position[1]).unwrap());
+
         // 毎フレームGPUバッファを更新
-        self.queue.write_buffer(
-            &self.instance_buffer,
-            0,
-            bytemuck::cast_slice(&self.sprites),
+        let mut bytes = Vec::with_capacity(
+            sorted_sprites.len() * std::mem::size_of::<SpriteCharacterInstance>(),
         );
+        for sprite in &sorted_sprites {
+            // 各参照の示す実体を u8 のスライスに変換して結合
+            bytes.extend_from_slice(bytemuck::bytes_of(*sprite));
+        }
+        self.queue.write_buffer(&self.instance_buffer, 0, &bytes);
+
+        // --- カメラ行列の計算と VertexUniform 更新 ---
+        // 実際はmapで計算したview_proj行列をGPUバッファに書き込む
+        let proj = glam::camera::rh::proj::directx::orthographic(
+            0.0,
+            self.target_logical_size.0,
+            self.target_logical_size.1,
+            0.0,
+            -1.0,
+            1.0,
+        );
+        let half_logical_w = self.target_logical_size.0 / 2.0;
+        let half_logical_h = self.target_logical_size.1 / 2.0;
+        let rotation = self.degress.to_radians();
+        let view =
+            glam::Mat4::from_translation(glam::Vec3::new(half_logical_w, half_logical_h, 0.0))
+                * glam::Mat4::from_rotation_z(rotation)
+                * glam::Mat4::from_scale(glam::Vec3::new(self.scale, self.scale, 1.0))
+                * glam::Mat4::from_translation(glam::Vec3::new(
+                    -self.camera_pos[0],
+                    -self.camera_pos[1],
+                    0.0,
+                ));
+        let view_proj = proj * view;
+        let uniform = VertexUniforms {
+            view_proj: view_proj.to_cols_array_2d(),
+        };
+        // Uniform バッファに書き込み
+        self.queue.write_buffer(
+            &self.uniform_buffers[1],
+            0,
+            bytemuck::cast_slice(&[uniform]),
+        );
+    }
+
+    fn update_input(&mut self) {
+        if self.input.reset {
+            // マップの左上の中心に表示が[0.0, 0.0]となる
+            self.camera_pos = [
+                self.target_logical_size.0 / 2.0,
+                self.target_logical_size.1 / 2.0,
+            ];
+            self.scale = 1.0;
+            self.degress = 0.0;
+            return;
+        }
+
+        let speed = 2.0;
+        let [dx, dy] = self.input.direction();
+
+        if dx != 0.0 || dy != 0.0 {
+            self.sprites[0].position[0] += dx * speed;
+            self.sprites[0].position[1] += dy * speed;
+            // スプライトの方向やアニメーションなどの座標はcpu側で設定する
+            self.direction = if dx > 0.0 {
+                2
+            } else if dx < 0.0 {
+                1
+            } else if dy > 0.0 {
+                0
+            } else if dy < 0.0 {
+                3
+            } else {
+                self.direction
+            };
+            self.sprites[0].uv_offset[1] =
+                32.0 * self.direction as f32 / self.textures[3].texture.height() as f32;
+        }
+
+        // 値がずれないように２の負のべき乗単位で拡大縮小する
+        if self.input.plus {
+            self.scale += 0.0625;
+        } else if self.input.minus {
+            if self.scale > 0.125 {
+                self.scale -= 0.0625;
+                self.scale = self.scale.max(0.125);
+            }
+        }
+
+        if self.input.rotation_l {
+            self.degress = (self.degress + 360.0 - 4.0) % 360.0;
+        } else if self.input.rotation_r {
+            self.degress = (self.degress + 4.0) % 360.0;
+        }
     }
 
     fn render(&mut self) -> anyhow::Result<()> {
@@ -574,12 +699,19 @@ impl State {
 
             // パイプライン設定
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.uniform_bind_groups[1], &[]);
             render_pass.set_bind_group(1, &self.texture_bind_group, &[]);
             render_pass.set_bind_group(2, &self.sampler_bind_group, &[]);
             // ここでキャラ全部のintanceを流し込む
             render_pass.set_vertex_buffer(0, self.instance_buffer.slice(..));
-            render_pass.draw(0..4, 0..self.sprites.len() as u32);
+            render_pass.draw(0..4, 0..(self.sprites.len() - 1) as u32);
+
+            // マップの影響を受けないやつ
+            render_pass.set_bind_group(0, &self.uniform_bind_groups[0], &[]);
+            render_pass.draw(
+                0..4,
+                (self.sprites.len() - 1) as u32..self.sprites.len() as u32,
+            );
         }
 
         // コマンドを実行
