@@ -7,16 +7,16 @@ struct GlobalUniforms {
 var<uniform> global_uniforms: GlobalUniforms;
 
 struct VertexInput {
-    @location(0) position: vec2<f32>,   // (0.0 ~ 1.0 のローカル座標)
-    @location(1) tex_coords: vec2<f32>,
+    @location(10) position: vec2<f32>,   // (0.0 ~ 1.0 のローカル座標)
+    @location(11) tex_coords: vec2<f32>,
 }
 
 // スプライトごとの個別データ（インスタンス入力）
 struct SpriteInstanceInput {
-    @location(2) display_position: vec2<f32>, // 画面上のピクセル位置 (x, y)
-    @location(3) display_size: vec2<f32>,     // 画面上の表示サイズ (width, height)
-    @location(4) uv_offset: vec2<f32>,       // 切り出し左上 (u0, v0)
-    @location(5) uv_size: vec2<f32>,         // 切り出し幅・高さ (u_w, v_h)
+    @location(0) display_position: vec2<f32>, // 画面上のピクセル位置 (x, y)
+    @location(1) display_size: vec2<f32>,     // 画面上の表示サイズ (width, height)
+    @location(2) uv_offset: vec2<f32>,       // 切り出し左上 (u0, v0)
+    @location(3) uv_size: vec2<f32>,         // 切り出し幅・高さ (u_w, v_h)
 }
 
 struct VertexOutput {

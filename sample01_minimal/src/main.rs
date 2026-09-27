@@ -1,9 +1,10 @@
 use sample01_minimal::{
-    run_polygon_simple, run_texture_filter_noise, run_viewport, run_viewport_stretch,
+    run_polygon_simple, run_texture_filter_color, run_texture_filter_noise, run_viewport,
+    run_viewport_stretch,
 };
 
 fn main() -> anyhow::Result<()> {
-    let default_run_id: i32 = 0;
+    let default_run_id: i32 = 99;
 
     // 第1引数（args[1]）を取得。引数が渡されていない場合は None
     let run_id: i32 = match std::env::args().nth(1) {
@@ -18,6 +19,7 @@ fn main() -> anyhow::Result<()> {
                     "viewport" => 1,
                     "viewport_strech" => 2, // 作ってはみたもののぼやけて使い物にならない、オフスクリーンに描画して転送する必要がある
                     "texture_filter_noise" => 3,
+                    "texture_filter_color" => 4,
                     // 3. それ以外（数値でも特定の文字列でもない）ならデフォルト値
                     _ => default_run_id,
                 }
@@ -32,6 +34,7 @@ fn main() -> anyhow::Result<()> {
         1 => run_viewport::run(),
         2 => run_viewport_stretch::run(),
         3 => run_texture_filter_noise::run(),
-        _ => run_texture_filter_noise::run(),
+        4 => run_texture_filter_color::run(),
+        _ => run_texture_filter_color::run(),
     }
 }

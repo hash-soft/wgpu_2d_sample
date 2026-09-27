@@ -26,12 +26,12 @@ impl TexVertex {
             attributes: &[
                 wgpu::VertexAttribute {
                     offset: 0,
-                    shader_location: 0, // @location(0) にあたる
+                    shader_location: 10, // @location(10) にあたる
                     format: wgpu::VertexFormat::Float32x3,
                 },
                 wgpu::VertexAttribute {
                     offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress, // 前までのサイズ分進む
-                    shader_location: 1,
+                    shader_location: 11,
                     format: wgpu::VertexFormat::Float32x2,
                 },
             ],
