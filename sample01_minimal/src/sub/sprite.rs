@@ -5,6 +5,7 @@ pub struct SpriteInstance {
     pub size: [f32; 2],      // 表示ピクセルサイズ
     pub uv_offset: [f32; 2], // 切り出しUVオフセット
     pub uv_size: [f32; 2],   // 切り出しUVサイズ
+    pub texture_index: u32,
 }
 
 impl SpriteInstance {
@@ -36,6 +37,12 @@ impl SpriteInstance {
                     offset: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
                     shader_location: 5,
                     format: wgpu::VertexFormat::Float32x2,
+                },
+                // location(6): texture_index
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
+                    shader_location: 6,
+                    format: wgpu::VertexFormat::Uint32,
                 },
             ],
         }

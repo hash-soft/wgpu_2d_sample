@@ -124,7 +124,10 @@ pub struct State {
     num_indices: u32,
     #[allow(dead_code)]
     diffuse_texture: texture::Texture, // 現在は使っていない
+    #[allow(dead_code)]
+    sampler: wgpu::Sampler,
     diffuse_bind_group: wgpu::BindGroup,
+    sampler_bind_group: wgpu::BindGroup,
     uniform_render_pipeline: wgpu::RenderPipeline,
     vertex_local_buffer: wgpu::Buffer,
     #[allow(dead_code)]
@@ -221,41 +224,54 @@ impl State {
         // テクスチャグループレイアウト
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT, // フラグメントシェーダーで使う
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        },
-                        count: None,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT, // フラグメントシェーダーで使う
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                        count: None,
-                    },
-                ],
+                    count: None,
+                }],
                 label: Some("texture_bind_group_layout"),
             });
 
         // テクスチャバインドグループ
         let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                },
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+            }],
             label: Some("diffuse_bind_group"),
+        });
+
+        let sampler = texture::Texture::create_sampler(&device);
+        let mut sampler_layout_entries = Vec::with_capacity(1);
+        sampler_layout_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+            count: None,
+        });
+
+        let sampler_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &sampler_layout_entries,
+                label: Some("sampler_bind_group_layout"),
+            });
+
+        let mut sampler_group_entries = Vec::with_capacity(1);
+        sampler_group_entries.push(wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::Sampler(&sampler),
+        });
+
+        let sampler_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &sampler_bind_group_layout,
+            entries: &sampler_group_entries,
+            label: Some("sampler_bind_group"),
         });
 
         // ユニフォームグループレイアウト
@@ -279,8 +295,9 @@ impl State {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
-                    Some(&texture_bind_group_layout),
                     Some(&uniform_bind_group_layout),
+                    Some(&texture_bind_group_layout),
+                    Some(&sampler_bind_group_layout),
                 ], // グループレイアウトをバインド
                 immediate_size: 0,
             });
@@ -375,6 +392,7 @@ impl State {
                 ],
                 uv_offset: [0.0, 0.0],
                 uv_size: [1.0, 1.0],
+                texture_index: 0,
             },
             // スプライト 2（切り抜き表示）
             SpriteInstance {
@@ -385,6 +403,7 @@ impl State {
                 ],
                 uv_offset: [0.2, 0.2],
                 uv_size: [0.6, 0.6],
+                texture_index: 0,
             },
         ];
 
@@ -469,7 +488,9 @@ impl State {
             index4_buffer,
             num_indices,
             diffuse_texture,
+            sampler,
             diffuse_bind_group,
+            sampler_bind_group,
             uniform_render_pipeline,
             vertex_local_buffer,
             uniform_buffer,
@@ -622,8 +643,9 @@ impl State {
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
 
             render_pass.set_pipeline(&self.uniform_render_pipeline);
-            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.diffuse_bind_group, &[]);
+            render_pass.set_bind_group(2, &self.sampler_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_local_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_index_buffer(self.index4_buffer.slice(..), wgpu::IndexFormat::Uint16);
