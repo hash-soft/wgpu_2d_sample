@@ -1,5 +1,5 @@
 use sample01_minimal::{
-    run_polygon_simple, run_texture_filter_blur_screen, run_texture_filter_color,
+    run_font_system, run_polygon_simple, run_texture_filter_blur_screen, run_texture_filter_color,
     run_texture_filter_noise, run_viewport, run_viewport_stretch,
 };
 
@@ -18,9 +18,10 @@ fn main() -> anyhow::Result<()> {
                     "polygon_simple" => 0,
                     "viewport" => 1,
                     "viewport_strech" => 2, // 作ってはみたもののぼやけて使い物にならない、オフスクリーンに描画して転送する必要がある
-                    "texture_filter_noise" => 3,
-                    "texture_filter_color" => 4,
-                    "texture_filter_blur_screen" => 5,
+                    "font_system" => 3,
+                    "texture_filter_noise" => 4,
+                    "texture_filter_color" => 5,
+                    "texture_filter_blur_screen" => 6,
                     // 3. それ以外（数値でも特定の文字列でもない）ならデフォルト値
                     _ => default_run_id,
                 }
@@ -34,9 +35,10 @@ fn main() -> anyhow::Result<()> {
         0 => run_polygon_simple::run(),
         1 => run_viewport::run(),
         2 => run_viewport_stretch::run(),
-        3 => run_texture_filter_noise::run(),
-        4 => run_texture_filter_color::run(),
-        5 => run_texture_filter_blur_screen::run(),
-        _ => run_texture_filter_blur_screen::run(),
+        3 => run_font_system::run(),
+        4 => run_texture_filter_noise::run(),
+        5 => run_texture_filter_color::run(),
+        6 => run_texture_filter_blur_screen::run(),
+        _ => run_font_system::run(),
     }
 }

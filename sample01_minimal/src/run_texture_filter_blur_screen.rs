@@ -153,7 +153,7 @@ impl State {
         let target_logical_size = (size.width as f32, size.height as f32);
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::DX12,
+            backends: wgpu::Backends::default(),
             flags: Default::default(),
             memory_budget_thresholds: Default::default(),
             backend_options: Default::default(),
