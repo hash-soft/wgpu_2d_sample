@@ -1,6 +1,6 @@
 use sample01_minimal::{
-    run_font_system, run_polygon_simple, run_texture_filter_blur_screen, run_texture_filter_color,
-    run_texture_filter_noise, run_viewport, run_viewport_stretch,
+    run_font_custom, run_font_system, run_polygon_simple, run_texture_filter_blur_screen,
+    run_texture_filter_color, run_texture_filter_noise, run_viewport, run_viewport_stretch,
 };
 
 fn main() -> anyhow::Result<()> {
@@ -19,9 +19,10 @@ fn main() -> anyhow::Result<()> {
                     "viewport" => 1,
                     "viewport_strech" => 2, // 作ってはみたもののぼやけて使い物にならない、オフスクリーンに描画して転送する必要がある
                     "font_system" => 3,
-                    "texture_filter_noise" => 4,
-                    "texture_filter_color" => 5,
-                    "texture_filter_blur_screen" => 6,
+                    "font_custom" => 4,
+                    "texture_filter_noise" => 5,
+                    "texture_filter_color" => 6,
+                    "texture_filter_blur_screen" => 7,
                     // 3. それ以外（数値でも特定の文字列でもない）ならデフォルト値
                     _ => default_run_id,
                 }
@@ -36,9 +37,10 @@ fn main() -> anyhow::Result<()> {
         1 => run_viewport::run(),
         2 => run_viewport_stretch::run(),
         3 => run_font_system::run(),
-        4 => run_texture_filter_noise::run(),
-        5 => run_texture_filter_color::run(),
-        6 => run_texture_filter_blur_screen::run(),
-        _ => run_font_system::run(),
+        4 => run_font_custom::run(),
+        5 => run_texture_filter_noise::run(),
+        6 => run_texture_filter_color::run(),
+        7 => run_texture_filter_blur_screen::run(),
+        _ => run_font_custom::run(),
     }
 }
