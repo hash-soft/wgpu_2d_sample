@@ -9,6 +9,8 @@ use winit::{
     window::Window,
 };
 
+use crate::sub::texture::Texture;
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
@@ -37,10 +39,10 @@ impl Vertex {
     }
 }
 
-// 左下に配置
+// 中央に配置
 const VERTICES: &[Vertex] = &[
     Vertex {
-        position: [-0.5, 0.0, 0.0],
+        position: [0.0, 1.0, 0.0],
         color: [1.0, 0.0, 0.0],
     },
     Vertex {
@@ -48,51 +50,33 @@ const VERTICES: &[Vertex] = &[
         color: [0.0, 1.0, 0.0],
     },
     Vertex {
-        position: [0.0, -1.0, 0.0],
+        position: [1.0, -1.0, 0.0],
         color: [0.0, 0.0, 1.0],
     },
 ];
 
-// 右上に配置 左上から下に進み1週する
-const VERTICES4: &[Vertex] = &[
-    Vertex {
-        position: [0.2, 0.8, 0.0],
-        color: [1.0, 0.0, 0.0],
-    }, // A
-    Vertex {
-        position: [0.2, 0.2, 0.0],
-        color: [0.0, 1.0, 0.0],
-    }, // B
-    Vertex {
-        position: [0.8, 0.2, 0.0],
-        color: [1.0, 0.0, 0.0],
-    }, // C
-    Vertex {
-        position: [0.8, 0.8, 0.0],
-        color: [0.0, 0.0, 1.0],
-    }, // D
-];
-
-const INDICES: &[u16] = &[0, 1, 3, 1, 2, 3];
-
 pub struct State {
+    #[allow(dead_code)]
+    target_logical_size: (f32, f32),
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    render_pipeline: wgpu::RenderPipeline,
-    dyn_render_pipeline: wgpu::RenderPipeline,
     buffer_render_pipeline: wgpu::RenderPipeline,
+    blit_render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
-    vertex4_buffer: wgpu::Buffer,
-    index4_buffer: wgpu::Buffer,
-    num_indices: u32,
+    render_target_view: wgpu::TextureView,
+    #[allow(dead_code)]
+    sampler: wgpu::Sampler,
+    blit_bind_group: wgpu::BindGroup,
     window: Arc<Window>,
 }
 
 impl State {
     async fn new(window: Arc<Window>) -> anyhow::Result<State> {
         let size = window.inner_size();
+        // 初期サイズを論理サイズとして設定する
+        let target_logical_size = (size.width as f32, size.height as f32);
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::default(),
@@ -164,14 +148,6 @@ impl State {
         println!("Surface Config:\n {:#?}", config);
         println!("=======================");
 
-        // シェーダの読み込み
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("shader_polygon_vertex_index.wgsl").into(),
-            ),
-        });
-
         // パイプラインの作成
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -179,96 +155,6 @@ impl State {
                 bind_group_layouts: &[],
                 immediate_size: 0,
             });
-
-        // 位置も色も固定の三角形パイプライン
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"), // エントリーポイント
-                buffers: &[],                 // 頂点シェーダーに渡したい頂点の型
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format, // サーフェスのフォーマット
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent::REPLACE,
-                        alpha: wgpu::BlendComponent::REPLACE,
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL, // 書き込む色の指定
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList, // 3つの頂点ごとに1つの三角形を描画する
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,                         // すべてのサンプルを使用
-                alpha_to_coverage_enabled: false, // アンチエイリアス
-            },
-            multiview_mask: None, // 配列レイヤーの数
-            cache: None,          // Androidのみ有効
-        });
-
-        let shader_dyn = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Dyn Shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("shader_polygon_vertex_index_color.wgsl").into(),
-            ),
-        });
-
-        // 位置は固定、色は位置によって変化する三角形パイプライン
-        let dyn_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Dyn Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader_dyn,
-                entry_point: Some("vs_main"),
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader_dyn,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
-                polygon_mode: wgpu::PolygonMode::Fill,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            // If the pipeline will be used with a multiview render pass, this
-            // tells wgpu to render to just specific texture layers.
-            multiview_mask: None,
-            cache: None,
-        });
 
         let shader_buffer = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Dyn Shader"),
@@ -327,32 +213,119 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        // 4角形頂点バッファ
-        let vertex4_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTICES4),
-            usage: wgpu::BufferUsages::VERTEX,
+        let render_target_size = wgpu::Extent3d {
+            width: target_logical_size.0 as u32,
+            height: target_logical_size.1 as u32,
+            depth_or_array_layers: 1,
+        };
+
+        let render_target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Fixed Resolution Render Target"),
+            size: render_target_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: surface_format, // シーン用のフォーマット
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         });
 
-        let index4_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(INDICES),
-            usage: wgpu::BufferUsages::INDEX,
+        let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // オフスクリーンから転送するパイプライン
+        let blit_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Blit Bind Group Layout"),
+                entries: &[
+                    // Binding 0: テクスチャ
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // Binding 1: サンプラー
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let blit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Blit Pipeline Layout"),
+            bind_group_layouts: &[Some(&blit_bind_group_layout)],
+            immediate_size: 0,
         });
-        let num_indices = INDICES.len() as u32;
+
+        let shader_blit = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Dyn Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader_blit.wgsl").into()),
+        });
+
+        let blit_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Blit Pipeline"),
+            layout: Some(&blit_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader_blit,
+                entry_point: Some("vs_main"),
+                buffers: &[], // 頂点バッファは空でOK
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader_blit,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format, // Surface（画面）のフォーマットを指定
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let sampler = Texture::create_sampler(&device);
+        let blit_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &blit_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&render_target_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+            label: Some("blit_bind_group"),
+        });
 
         Ok(Self {
+            target_logical_size,
             surface,
             device,
             queue,
             config,
-            render_pipeline,
-            dyn_render_pipeline,
             buffer_render_pipeline,
+            blit_render_pipeline,
             vertex_buffer,
-            vertex4_buffer,
-            index4_buffer,
-            num_indices,
+            render_target_view,
+            sampler,
+            blit_bind_group,
             window,
         })
     }
@@ -412,6 +385,33 @@ impl State {
             });
 
         {
+            // オフスクリーンレンダーパス開始
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Offscreen Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.render_target_view, // 固定解像度のViewを指定
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.1,
+                            g: 0.2,
+                            b: 0.3,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+
+            render_pass.set_pipeline(&self.buffer_render_pipeline);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.draw(0..3, 0..1);
+        }
+
+        {
             // レンダーパス開始
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -436,26 +436,9 @@ impl State {
                 multiview_mask: None,           // マルチビュー機能のためのマスク
             });
 
-            // これで描画範囲を指定する
-            //render_pass.set_viewport(100.0, 100.0, 600.0, 400.0, 0.0, 0.0);
-
-            // パイプライン設定
-            render_pass.set_pipeline(&self.render_pipeline);
-            // 頂点バッファなしで描画
+            render_pass.set_pipeline(&self.blit_render_pipeline);
+            render_pass.set_bind_group(0, &self.blit_bind_group, &[]);
             render_pass.draw(0..3, 0..1);
-
-            // dyn_render_pipeline
-            render_pass.set_pipeline(&self.dyn_render_pipeline);
-            render_pass.draw(0..3, 0..1);
-
-            // buffer_render_pipeline
-            render_pass.set_pipeline(&self.buffer_render_pipeline);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.draw(0..3, 0..1);
-
-            render_pass.set_vertex_buffer(0, self.vertex4_buffer.slice(..));
-            render_pass.set_index_buffer(self.index4_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
         }
 
         // コマンドを実行
@@ -480,7 +463,7 @@ impl App {
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window_attributes = Window::default_attributes()
-            .with_inner_size(winit::dpi::PhysicalSize::new(800, 600))
+            .with_inner_size(winit::dpi::PhysicalSize::new(960, 540))
             .with_visible(false);
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         window.set_visible(true);
