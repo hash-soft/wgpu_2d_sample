@@ -6,17 +6,12 @@ struct GlobalUniforms {
 @group(0) @binding(0)
 var<uniform> global_uniforms: GlobalUniforms;
 
-struct VertexInput {
-    @location(10) position: vec2<f32>,   // (0.0 ~ 1.0 のローカル座標)
-    @location(11) tex_coords: vec2<f32>,
-}
-
 // スプライトごとの個別データ（インスタンス入力）
 struct SpriteInstanceInput {
     @location(0) display_position: vec2<f32>, // 画面上のピクセル位置 (x, y)
-    @location(1) display_size: vec2<f32>,     // 画面上の表示サイズ (width, height)
-    @location(2) uv_offset: vec2<f32>,       // 切り出し左上 (u0, v0)
-    @location(3) uv_size: vec2<f32>,         // 切り出し幅・高さ (u_w, v_h)
+    @location(1) display_size: vec2<f32>, // 画面上の表示サイズ (width, height)
+    @location(2) uv_offset: vec2<f32>, // 切り出し左上 (u0, v0)
+    @location(3) uv_size: vec2<f32>, // 切り出し幅・高さ (u_w, v_h)
 }
 
 struct VertexOutput {
@@ -24,15 +19,26 @@ struct VertexOutput {
     @location(0) tex_coords: vec2<f32>,
 }
 
+const VERTEX_POSITIONS = array<vec2<f32>, 4>(
+        vec2<f32>(0.0, 0.0),
+        vec2<f32>(0.0, 1.0),
+        vec2<f32>(1.0, 0.0),
+        vec2<f32>(1.0, 1.0),
+    );
+
 @vertex
-fn vs_main(model: VertexInput, instance: SpriteInstanceInput) -> VertexOutput {
+fn vs_main(
+    @builtin(vertex_index) in_vertex_index: u32,
+    instance: SpriteInstanceInput,
+) -> VertexOutput {
     var out: VertexOutput;
+
+    let local_uv = VERTEX_POSITIONS[in_vertex_index];
     // 0.0 ~ 1.0 のローカル UV を指定矩形の UV 範囲にスケーリング・シフト
-    out.tex_coords = instance.uv_offset + model.tex_coords * instance.uv_size;
-    //out.tex_coords = model.tex_coords;
+    out.tex_coords = instance.uv_offset + local_uv * instance.uv_size;
 
     // ピクセル位置と画像サイズからスクリーン上のピクセル座標を計算
-    let pixel_pos = instance.display_position + model.position * instance.display_size;
+    let pixel_pos = instance.display_position + local_uv * instance.display_size;
 
     // ピクセル座標 (0 ~ screen_size) を NDC 座標 (-1.0 ~ 1.0) に変換
     // X: 0 -> -1.0, width -> 1.0

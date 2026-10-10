@@ -7,4 +7,5 @@ pub mod run_texture_filter_color;
 pub mod run_texture_filter_noise;
 pub mod run_viewport;
 pub mod run_viewport_stretch;
+pub mod run_window;
 mod sub;

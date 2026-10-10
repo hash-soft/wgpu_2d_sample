@@ -13,57 +13,9 @@ use crate::{sub::key::InputState, sub::sprite::SpriteInstance, sub::texture};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct TexVertex {
-    position: [f32; 3],
-    tex_coords: [f32; 2],
-}
-
-impl TexVertex {
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<TexVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 10, // @location(10) にあたる
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress, // 前までのサイズ分進む
-                    shader_location: 11,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-            ],
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Uniforms {
     screen_size: [f32; 2],
 }
-
-// 頂点データは 0.0 ~ 1.0 の矩形にする
-const VERTICES_LOCAL: &[TexVertex] = &[
-    TexVertex {
-        position: [0.0, 0.0, 0.0],
-        tex_coords: [0.0, 0.0],
-    }, // 左上
-    TexVertex {
-        position: [0.0, 1.0, 0.0],
-        tex_coords: [0.0, 1.0],
-    }, // 左下
-    TexVertex {
-        position: [1.0, 1.0, 0.0],
-        tex_coords: [1.0, 1.0],
-    }, // 右下
-    TexVertex {
-        position: [1.0, 0.0, 0.0],
-        tex_coords: [1.0, 0.0],
-    }, // 右上
-];
 
 const INDICES: &[u16] = &[0, 1, 3, 1, 2, 3];
 
@@ -129,7 +81,6 @@ pub struct State {
     diffuse_bind_group: wgpu::BindGroup,
     sampler_bind_group: wgpu::BindGroup,
     uniform_render_pipeline: wgpu::RenderPipeline,
-    vertex_local_buffer: wgpu::Buffer,
     #[allow(dead_code)]
     uniform_buffer: wgpu::Buffer, // 保持しているだけ
     uniform_bind_group: wgpu::BindGroup,
@@ -315,7 +266,7 @@ impl State {
                 vertex: wgpu::VertexState {
                     module: &uniform_shader,
                     entry_point: Some("vs_main"),
-                    buffers: &[Some(TexVertex::desc()), Some(SpriteInstance::desc())],
+                    buffers: &[Some(SpriteInstance::desc())],
                     compilation_options: Default::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -329,7 +280,7 @@ impl State {
                     compilation_options: Default::default(),
                 }),
                 primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
                     strip_index_format: None,
                     front_face: wgpu::FrontFace::Ccw,
                     cull_mode: Some(wgpu::Face::Back),
@@ -374,12 +325,6 @@ impl State {
                 resource: uniform_buffer.as_entire_binding(),
             }],
             label: Some("uniform_bind_group"),
-        });
-
-        let vertex_local_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Local Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTICES_LOCAL),
-            usage: wgpu::BufferUsages::VERTEX,
         });
 
         let sprites = vec![
@@ -492,7 +437,6 @@ impl State {
             diffuse_bind_group,
             sampler_bind_group,
             uniform_render_pipeline,
-            vertex_local_buffer,
             uniform_buffer,
             uniform_bind_group,
             uniform,
@@ -638,10 +582,8 @@ impl State {
             render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             render_pass.set_bind_group(1, &self.diffuse_bind_group, &[]);
             render_pass.set_bind_group(2, &self.sampler_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_local_buffer.slice(..));
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_index_buffer(self.index4_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.sprites.len() as u32);
+            render_pass.set_vertex_buffer(0, self.instance_buffer.slice(..));
+            render_pass.draw(0..4, 0..self.sprites.len() as u32);
         }
 
         // コマンドを実行
