@@ -1,5 +1,5 @@
 use sample01_minimal::{
-    run_font_custom, run_font_system, run_off_screen_render, run_polygon_simple,
+    run_depth_buffer, run_font_custom, run_font_system, run_off_screen_render, run_polygon_simple,
     run_texture_filter_blur_screen, run_texture_filter_color, run_texture_filter_noise,
     run_viewport, run_viewport_stretch, run_window,
 };
@@ -23,9 +23,10 @@ fn main() -> anyhow::Result<()> {
                     "font_system" => 4,
                     "font_custom" => 5,
                     "window" => 6,
-                    "texture_filter_noise" => 7,
-                    "texture_filter_color" => 8,
-                    "texture_filter_blur_screen" => 9,
+                    "depth_buffer" => 7,
+                    "texture_filter_noise" => 8,
+                    "texture_filter_color" => 9,
+                    "texture_filter_blur_screen" => 10,
                     // 3. それ以外（数値でも特定の文字列でもない）ならデフォルト値
                     _ => default_run_id,
                 }
@@ -43,9 +44,10 @@ fn main() -> anyhow::Result<()> {
         4 => run_font_system::run(),
         5 => run_font_custom::run(),
         6 => run_window::run(),
-        7 => run_texture_filter_noise::run(),
-        8 => run_texture_filter_color::run(),
-        9 => run_texture_filter_blur_screen::run(),
-        _ => run_window::run(),
+        7 => run_depth_buffer::run(),
+        8 => run_texture_filter_noise::run(),
+        9 => run_texture_filter_color::run(),
+        10 => run_texture_filter_blur_screen::run(),
+        _ => run_depth_buffer::run(),
     }
 }

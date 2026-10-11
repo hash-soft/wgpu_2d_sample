@@ -1,4 +1,5 @@
-/// とりあえずSpriteInstanceを使う
+/// FrameInstanceを用意した
+/// z値は使っていない
 use std::{iter, sync::Arc};
 
 use glyphon::{
@@ -14,7 +15,10 @@ use winit::{
     window::Window,
 };
 
-use crate::sub::{font::CustomFont, frame, sprite::SpriteInstance};
+use crate::sub::{
+    font::CustomFont,
+    frame::{self, FrameInstance},
+};
 use crate::{sub::key::InputState, sub::texture::Texture};
 
 #[repr(C)]
@@ -37,7 +41,7 @@ pub struct State {
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
     instance_buffer: wgpu::Buffer,
-    sprites: Vec<SpriteInstance>,
+    sprites: Vec<FrameInstance>,
     font_system: FontSystem,
     text_renderer: TextRenderer,
     text_buffer: glyphon::Buffer,
@@ -207,7 +211,7 @@ impl State {
 
         let uniform_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Filter Uniform Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader_texture_uniform.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader_texture_frame.wgsl").into()),
         });
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -216,7 +220,7 @@ impl State {
             vertex: wgpu::VertexState {
                 module: &uniform_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[Some(SpriteInstance::desc())],
+                buffers: &[Some(FrameInstance::desc())],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -267,16 +271,7 @@ impl State {
             label: Some("uniform_bind_group"),
         });
 
-        let mut sprites = vec![
-            SpriteInstance {
-                position: [0.0, 0.0],
-                size: [0.0, 0.0],
-                uv_offset: [0.0, 0.0],
-                uv_size: [0.0, 0.0],
-                texture_index: 0,
-            };
-            9
-        ];
+        let mut sprites = vec![FrameInstance::default(); 9];
         // 中央に半分のサイズで出す
         frame::make_frame_sprites(
             &mut sprites[0..9],
@@ -284,6 +279,7 @@ impl State {
             &(target_logical_size.0 / 2.0, target_logical_size.1 / 2.0),
             &(textures[0].texture.width(), textures[0].texture.height()),
             0,
+            0.0,
         );
 
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -424,17 +420,7 @@ impl State {
         self.text_renderer_prepare();
     }
 
-    fn update(&mut self) {
-        // キーの上下でノイズの強さを変更する
-        self.update_input();
-        self.queue.write_buffer(
-            &self.instance_buffer,
-            0,
-            bytemuck::cast_slice(&self.sprites),
-        );
-    }
-
-    fn update_input(&mut self) {}
+    fn update(&mut self) {}
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: KeyCode, pressed: bool) {
         match (key, pressed) {

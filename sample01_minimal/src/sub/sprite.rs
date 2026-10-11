@@ -1,5 +1,5 @@
 #[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SpriteInstance {
     pub position: [f32; 2],  // 表示ピクセル位置
     pub size: [f32; 2],      // 表示ピクセルサイズ
