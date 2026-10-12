@@ -110,10 +110,10 @@ impl State {
         let mut selectable_fonts = Vec::new();
         let mut font_system = FontSystem::new();
         // カスタムフォントの読み込み
-        let font_data_yosu = include_bytes!("fonts/yosugaraver1_2.ttf");
+        let font_data_yosu = include_bytes!("../../fonts/yosugaraver1_2.ttf");
         let font_yosu = CustomFont::load_font(&mut font_system, font_data_yosu.to_vec()).unwrap();
 
-        let font_data_gen = include_bytes!("fonts/GenEiPOPlePw-Bk.ttf");
+        let font_data_gen = include_bytes!("../../fonts/GenEiPOPlePw-Bk.ttf");
         let font_gen = CustomFont::load_font(&mut font_system, font_data_gen.to_vec()).unwrap();
 
         let ms_font = CustomFont::load_system_font(&mut font_system, "Meiryo").unwrap();

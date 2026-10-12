@@ -52,6 +52,11 @@ impl FrameInstance {
                     offset: 36,
                     shader_location: 5,
                     format: wgpu::VertexFormat::Float32,
+                }, // opacity
+                wgpu::VertexAttribute {
+                    offset: 40,
+                    shader_location: 6,
+                    format: wgpu::VertexFormat::Float32,
                 }, // z
             ],
         }
@@ -78,6 +83,7 @@ pub fn make_frame_sprites(
     base.uv_offset = [0.0, 0.0];
     base.uv_size = uv_size;
     base.texture_index = tex_index;
+    base.opacity = 1.0;
     instance.z = z;
 
     let instance = &mut slice[1];
@@ -87,6 +93,7 @@ pub fn make_frame_sprites(
     base.uv_offset = [2.0 / 3.0, 0.0];
     base.uv_size = uv_size;
     base.texture_index = tex_index;
+    base.opacity = 1.0;
     instance.z = z;
 
     let instance = &mut slice[2];
@@ -96,6 +103,7 @@ pub fn make_frame_sprites(
     base.uv_offset = [0.0, 2.0 / 3.0];
     base.uv_size = uv_size;
     base.texture_index = tex_index;
+    base.opacity = 1.0;
     instance.z = z;
 
     let instance = &mut slice[3];
@@ -108,6 +116,7 @@ pub fn make_frame_sprites(
     base.uv_offset = [2.0 / 3.0, 2.0 / 3.0];
     base.uv_size = uv_size;
     base.texture_index = tex_index;
+    base.opacity = 1.0;
     instance.z = z;
 
     // 四辺
@@ -118,6 +127,7 @@ pub fn make_frame_sprites(
     base.uv_offset = [1.0 / 3.0, 0.0];
     base.uv_size = uv_size;
     base.texture_index = tex_index;
+    base.opacity = 1.0;
     instance.z = z;
 
     let instance = &mut slice[5];
@@ -127,6 +137,7 @@ pub fn make_frame_sprites(
     base.uv_offset = [0.0, 1.0 / 3.0];
     base.uv_size = uv_size;
     base.texture_index = tex_index;
+    base.opacity = 1.0;
     instance.z = z;
 
     let instance = &mut slice[6];
@@ -139,6 +150,7 @@ pub fn make_frame_sprites(
     base.uv_offset = [1.0 / 3.0, 2.0 / 3.0];
     base.uv_size = uv_size;
     base.texture_index = tex_index;
+    base.opacity = 1.0;
     instance.z = z;
 
     let instance = &mut slice[7];
@@ -151,6 +163,7 @@ pub fn make_frame_sprites(
     base.uv_offset = [2.0 / 3.0, 1.0 / 3.0];
     base.uv_size = uv_size;
     base.texture_index = tex_index;
+    base.opacity = 1.0;
     instance.z = z;
 
     // 中央
@@ -167,5 +180,6 @@ pub fn make_frame_sprites(
     base.uv_offset = [1.0 / 3.0, 1.0 / 3.0];
     base.uv_size = uv_size;
     base.texture_index = tex_index;
+    base.opacity = 1.0;
     instance.z = z;
 }

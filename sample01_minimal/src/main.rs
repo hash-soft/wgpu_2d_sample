@@ -1,7 +1,9 @@
 use sample01_minimal::{
     run_depth_buffer, run_font_custom, run_font_system, run_off_screen_render, run_polygon_simple,
-    run_texture_filter_blur_screen, run_texture_filter_color, run_texture_filter_noise,
-    run_viewport, run_viewport_stretch, run_window,
+    run_sprite_tilemap, run_texture_bindless, run_texture_filter_blur_screen,
+    run_texture_filter_color, run_texture_filter_noise, run_texture_introduction,
+    run_texture_multi_2d_array, run_texture_multi_bind_group, run_texture_uniform, run_viewport,
+    run_viewport_stretch, run_window,
 };
 
 fn main() -> anyhow::Result<()> {
@@ -10,24 +12,32 @@ fn main() -> anyhow::Result<()> {
     // 第1引数（args[1]）を取得。引数が渡されていない場合は None
     let run_id: i32 = match std::env::args().nth(1) {
         Some(arg) => {
-            // 1. 数値への変換を試みる
+            // 数値への変換を試みる
             if let Ok(num) = arg.parse::<i32>() {
                 num
             } else {
-                // 2. 特定の文字列の場合の判定
+                // 特定の文字列の場合の判定
                 match arg.as_str() {
-                    "polygon_simple" => 0,
-                    "viewport" => 1,
-                    "viewport_strech" => 2, // 作ってはみたもののぼやけて使い物にならない、オフスクリーンに描画して転送する必要がある
-                    "off_screen_render" => 3,
-                    "font_system" => 4,
-                    "font_custom" => 5,
-                    "window" => 6,
-                    "depth_buffer" => 7,
-                    "texture_filter_noise" => 8,
-                    "texture_filter_color" => 9,
-                    "texture_filter_blur_screen" => 10,
-                    // 3. それ以外（数値でも特定の文字列でもない）ならデフォルト値
+                    "polygon_simple" => 0,            // 三角形の描画
+                    "texture_introduction" => 10,     // 単一のテクスチャ表示
+                    "texture_uniform" => 11,          // 同一テクスチャから複数回描画
+                    "texture_multi_bind_group" => 12, // BindGropuを複数登録し複数のテクスチャを表示
+                    "texture_multi_2d_array" => 13,   // 1回描画で複数のテクスチャを表示
+                    "texture_bindless" => 14,         // サイズの異なるテクスチャ配列
+                    "viewport" => 20,                 // ビューポート
+                    // ビューポートを設定して引き延ばし転送
+                    // 作ってはみたもののぼやけて使い物にならない、オフスクリーンに描画して転送する必要がある
+                    "viewport_strech" => 21,
+                    "off_screen_render" => 30,    // オフスクリーン描画
+                    "font_system" => 40,          // システムフォント
+                    "font_custom" => 41,          // 外部フォント
+                    "window" => 50,               // フレームテクスチャを使ってウィンドウを作る
+                    "depth_buffer" => 51,         // 深度バッファを使ってウィンドウの重ね合わせ
+                    "texture_filter_noise" => 60, // テクスチャフィルター：ノイズ
+                    "texture_filter_color" => 61, // テクスチャフィルター：カラー
+                    "texture_filter_blur_screen" => 62, // テクスチャフィルター：ぼかし
+                    "sprite_tilemap" => 70, // スプライトをタイルマップのようにならべだけのもの
+                    // それ以外（数値でも特定の文字列でもない）ならデフォルト値
                     _ => default_run_id,
                 }
             }
@@ -38,16 +48,22 @@ fn main() -> anyhow::Result<()> {
 
     match run_id {
         0 => run_polygon_simple::run(),
-        1 => run_viewport::run(),
-        2 => run_viewport_stretch::run(),
-        3 => run_off_screen_render::run(),
-        4 => run_font_system::run(),
-        5 => run_font_custom::run(),
-        6 => run_window::run(),
-        7 => run_depth_buffer::run(),
-        8 => run_texture_filter_noise::run(),
-        9 => run_texture_filter_color::run(),
-        10 => run_texture_filter_blur_screen::run(),
+        10 => run_texture_introduction::run(),
+        11 => run_texture_uniform::run(),
+        12 => run_texture_multi_bind_group::run(),
+        13 => run_texture_multi_2d_array::run(),
+        14 => run_texture_bindless::run(),
+        20 => run_viewport::run(),
+        21 => run_viewport_stretch::run(),
+        30 => run_off_screen_render::run(),
+        40 => run_font_system::run(),
+        41 => run_font_custom::run(),
+        50 => run_window::run(),
+        51 => run_depth_buffer::run(),
+        60 => run_texture_filter_noise::run(),
+        61 => run_texture_filter_color::run(),
+        62 => run_texture_filter_blur_screen::run(),
+        70 => run_sprite_tilemap::run(),
         _ => run_depth_buffer::run(),
     }
 }

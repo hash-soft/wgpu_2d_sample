@@ -1,5 +1,5 @@
 [package]
-name = "sample02_texture"
+name = "sample02_composite"
 version = "0.1.0"
 edition = "2024"
 

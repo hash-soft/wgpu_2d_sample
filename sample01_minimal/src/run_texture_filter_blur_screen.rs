@@ -22,7 +22,6 @@ use crate::sub::{key::InputState, sprite::SpriteInstance, texture::Texture};
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct BlurSpriteInstance {
     pub base: SpriteInstance,
-    pub opacity: f32,
     pub scale: [f32; 2], // 拡大縮小倍率 (sx, sy) / 1.0 = 等倍
     pub rotation: f32,   // 回転角度（ラジアン, 時計回り正）
     pub pivot: [f32; 2], // 回転軸（ローカル比率 0.0〜1.0 / [0.5,0.5] = 中心）
@@ -225,7 +224,7 @@ impl State {
             offscreen_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // --- リソース読み込み ---
-        let dragon_bytes: &[u8] = include_bytes!("image/characters/pipo-enemy021.png");
+        let dragon_bytes: &[u8] = include_bytes!("../../image/characters/pipo-enemy021.png");
         let texture = Texture::from_bytes(&device, &queue, dragon_bytes, "Dragon Texture")?;
         let sampler = Texture::create_sampler(&device);
 
@@ -447,8 +446,8 @@ impl State {
                     uv_offset: [0.0, 0.0],
                     uv_size: [1.0, 1.0],
                     texture_index: 0,
+                    opacity: 1.0,
                 },
-                opacity: 1.0,
                 scale: [1.0, 1.0],
                 rotation: 0.0,
                 pivot: [0.5, 0.5],
@@ -463,8 +462,8 @@ impl State {
                     uv_offset: [0.0, 0.0],
                     uv_size: [1.0, 1.0],
                     texture_index: 0,
+                    opacity: 1.0,
                 },
-                opacity: 1.0,
                 scale: [2.0, 2.0],
                 rotation: 0.0,
                 pivot: [0.5, 0.5],

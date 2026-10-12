@@ -9,7 +9,7 @@ use winit::{
     window::Window,
 };
 
-use crate::texture::{self, Texture};
+use crate::sub::texture::Texture;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -79,7 +79,7 @@ pub struct State {
     index4_buffer: wgpu::Buffer,
     num_indices: u32,
     #[allow(dead_code)]
-    diffuse_texture: texture::Texture,
+    diffuse_texture: Texture,
     #[allow(dead_code)]
     sampler: wgpu::Sampler,
     diffuse_bind_group: wgpu::BindGroup,
@@ -160,7 +160,7 @@ impl State {
         println!("Surface Config:\n {:#?}", config);
         println!("=======================");
 
-        let diffuse_bytes = include_bytes!("image/characters/pipo-enemy021.png");
+        let diffuse_bytes = include_bytes!("../../image/characters/pipo-enemy021.png");
         let diffuse_texture =
             Texture::from_bytes(&device, &queue, diffuse_bytes, "enemy021").unwrap();
         let sampler = Texture::create_sampler(&device);
@@ -215,7 +215,7 @@ impl State {
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader_texture.wgsl").into()),
         });
 
         // Vertexを使用したパイプライン

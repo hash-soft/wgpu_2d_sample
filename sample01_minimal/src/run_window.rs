@@ -112,7 +112,7 @@ impl State {
         };
 
         let empty_texture = Texture::create_empty_texture(&device, &queue);
-        let dragon_bytes: &[u8] = include_bytes!("image/window/rainbow.png");
+        let dragon_bytes: &[u8] = include_bytes!("../../image/window/rainbow.png");
         let array_bytes = vec![dragon_bytes];
 
         let mut textures = Vec::with_capacity(array_bytes.len());
@@ -291,7 +291,7 @@ impl State {
         let mut selectable_fonts = Vec::new();
         let mut font_system = FontSystem::new();
         // メッセージに適したフォントを使う
-        let font_data_gen = include_bytes!("fonts/GenEiPOPlePw-Bk.ttf");
+        let font_data_gen = include_bytes!("../../fonts/GenEiPOPlePw-Bk.ttf");
         let font_gen = CustomFont::load_font(&mut font_system, font_data_gen.to_vec()).unwrap();
         selectable_fonts.push(font_gen);
 

@@ -168,7 +168,7 @@ impl State {
         println!("Surface Config:\n {:#?}", config);
         println!("=======================");
 
-        let diffuse_bytes = include_bytes!("image/characters/pipo-enemy021.png");
+        let diffuse_bytes = include_bytes!("../../image/characters/pipo-enemy021.png");
         let diffuse_texture =
             texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "enemy021").unwrap();
 
@@ -338,6 +338,7 @@ impl State {
                 uv_offset: [0.0, 0.0],
                 uv_size: [1.0, 1.0],
                 texture_index: 0,
+                opacity: 1.0,
             },
             // スプライト 2（切り抜き表示）
             SpriteInstance {
@@ -349,6 +350,7 @@ impl State {
                 uv_offset: [0.2, 0.2],
                 uv_size: [0.6, 0.6],
                 texture_index: 0,
+                opacity: 1.0,
             },
         ];
 

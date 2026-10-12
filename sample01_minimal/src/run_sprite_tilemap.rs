@@ -10,7 +10,7 @@ use winit::{
     window::Window,
 };
 
-use crate::{key::InputState, texture::Texture};
+use crate::sub::{key::InputState, texture::Texture};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -80,6 +80,7 @@ pub struct State {
     #[allow(dead_code)]
     sampler: wgpu::Sampler,
     texture_bind_group: wgpu::BindGroup,
+    sampler_bind_group: wgpu::BindGroup,
     uniform_bind_group: wgpu::BindGroup,
     instance_buffer: wgpu::Buffer,
     #[allow(dead_code)]
@@ -92,7 +93,15 @@ pub struct State {
 impl State {
     async fn new(window: Arc<Window>) -> anyhow::Result<State> {
         let size = window.inner_size();
-        let instance = wgpu::Instance::default();
+
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::default(),
+            flags: Default::default(),
+            memory_budget_thresholds: Default::default(),
+            backend_options: Default::default(),
+            display: Default::default(),
+        });
+
         let surface = instance.create_surface(window.clone()).unwrap();
 
         let adapter = instance
@@ -106,9 +115,9 @@ impl State {
             .unwrap();
 
         let limits = adapter.limits();
-        // サンプラー1枚+テクスチャ8枚
+        // テクスチャ8枚
         // スプライトのほうが多いからスプライトのレイアウトを使いまわせばいいか
-        let max_sampled_textures = Texture::request_max_sampled_textures(&limits, 9);
+        let max_sampled_textures = Texture::request_max_textures(&limits, 8);
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -146,8 +155,8 @@ impl State {
 
         // 複数テクスチャのロードと準備
         let empty_texture = Texture::create_empty_texture(&device, &queue);
-        let world_bytes: &[u8] = include_bytes!("image/tilesets/world.png");
-        let upper_bytes: &[u8] = include_bytes!("image/tilesets/upper.png");
+        let world_bytes: &[u8] = include_bytes!("../../image/tilesets/world.png");
+        let upper_bytes: &[u8] = include_bytes!("../../image/tilesets/upper.png");
         let array_bytes = vec![world_bytes, upper_bytes]; // テクスチャを増やす場合は要素を追加
 
         let mut textures = Vec::with_capacity(array_bytes.len());
@@ -155,10 +164,9 @@ impl State {
             let texture = Texture::from_bytes(&device, &queue, bytes, "Texture 2D")?;
             textures.push(texture);
         }
-        let sampler = Texture::create_sampler(&device);
 
-        let max_sampled_textures: u32 = 3;
-        let texture_count = max_sampled_textures.saturating_sub(1);
+        let max_sampled_textures: u32 = 2;
+        let texture_count = max_sampled_textures;
 
         let mut layout_entries = Vec::with_capacity(max_sampled_textures as usize);
         for i in 0..texture_count {
@@ -173,12 +181,6 @@ impl State {
                 count: None,
             });
         }
-        layout_entries.push(wgpu::BindGroupLayoutEntry {
-            binding: texture_count,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-            count: None,
-        });
 
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -199,15 +201,38 @@ impl State {
                 resource: wgpu::BindingResource::TextureView(&empty_texture.view),
             });
         }
-        group_entries.push(wgpu::BindGroupEntry {
-            binding: texture_count,
-            resource: wgpu::BindingResource::Sampler(&sampler),
-        });
 
         let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_bind_group_layout,
             entries: &group_entries,
             label: Some("texture_bind_group"),
+        });
+
+        let sampler = Texture::create_sampler(&device);
+        let mut sampler_layout_entries = Vec::with_capacity(1);
+        sampler_layout_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+            count: None,
+        });
+
+        let sampler_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &sampler_layout_entries,
+                label: Some("sampler_bind_group_layout"),
+            });
+
+        let mut sampler_group_entries = Vec::with_capacity(1);
+        sampler_group_entries.push(wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::Sampler(&sampler),
+        });
+
+        let sampler_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &sampler_bind_group_layout,
+            entries: &sampler_group_entries,
+            label: Some("sampler_bind_group"),
         });
 
         let map_width = 100u32;
@@ -269,7 +294,6 @@ impl State {
             label: Some("uniform_bind_group"),
         });
 
-        // WGSLシェーダーコードの動的構築
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Tilemap Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader_sprite_tilemap.wgsl").into()),
@@ -279,8 +303,9 @@ impl State {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
-                    Some(&texture_bind_group_layout),
                     Some(&uniform_bind_group_layout),
+                    Some(&texture_bind_group_layout),
+                    Some(&sampler_bind_group_layout),
                 ],
                 immediate_size: 0,
             });
@@ -359,6 +384,7 @@ impl State {
             textures,
             sampler,
             texture_bind_group,
+            sampler_bind_group,
             uniform_bind_group,
             instance_buffer,
             map_data,
@@ -448,8 +474,9 @@ impl State {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.texture_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.texture_bind_group, &[]);
+            render_pass.set_bind_group(2, &self.sampler_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.instance_buffer.slice(..));
             render_pass.draw(0..4, 0..self.tiles.len() as u32);
         }

@@ -12,6 +12,8 @@ struct SpriteInstanceInput {
     @location(1) display_size: vec2<f32>, // 画面上の表示サイズ (width, height)
     @location(2) uv_offset: vec2<f32>, // 切り出し左上 (u0, v0)
     @location(3) uv_size: vec2<f32>, // 切り出し幅・高さ (u_w, v_h)
+    @location(4) texture_index: u32, // 使っていない
+    @location(5) opcaicty: f32, // 使っていない
 }
 
 struct VertexOutput {

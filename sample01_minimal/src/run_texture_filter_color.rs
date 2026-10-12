@@ -17,7 +17,6 @@ use crate::{sub::key::InputState, sub::texture::Texture};
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ColorSpriteInstance {
     pub base: SpriteInstance,
-    pub opacity: f32,
     pub color_multiply: [f32; 4],
     pub color_add: [f32; 4],
 }
@@ -166,7 +165,7 @@ impl State {
         };
 
         let empty_texture = Texture::create_empty_texture(&device, &queue);
-        let dragon_bytes: &[u8] = include_bytes!("image/characters/pipo-enemy021.png");
+        let dragon_bytes: &[u8] = include_bytes!("../../image/characters/pipo-enemy021.png");
         let array_bytes = vec![dragon_bytes];
 
         let mut textures = Vec::with_capacity(array_bytes.len());
@@ -341,8 +340,8 @@ impl State {
                 uv_offset: [0.0, 0.0],
                 uv_size: [1.0, 1.0],
                 texture_index: 0,
+                opacity: 1.0,
             },
-            opacity: 1.0,
             color_multiply: [1.0, 0.2, 0.2, 1.0],
             color_add: [0.0, 0.0, 0.0, 0.0],
         }];

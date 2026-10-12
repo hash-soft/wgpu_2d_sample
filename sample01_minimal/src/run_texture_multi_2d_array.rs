@@ -1,13 +1,3 @@
-/// この方法をベースに拡張していく
-/// todo
-/// ・フィルター それぞれ組み込んでみて負荷を確認する
-/// ・組み込む前にサンプルの場所を移動 > minimal
-/// ・> 色合成
-/// ・> ノイズ
-/// ・> ブラー
-/// memo
-/// ・ブレンド方法を変えるにはレンダーパイプライン変えないといけないからdrawを分割する必要がある
-///
 use std::{iter, sync::Arc};
 
 use wgpu::util::DeviceExt;
@@ -19,40 +9,35 @@ use winit::{
     window::Window,
 };
 
-use crate::{key::InputState, sprite::SpriteCharacterInstance, texture::Texture};
+use crate::sub::{
+    key::InputState,
+    sprite::SpriteInstance,
+    texture::{self, Texture},
+};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct VertexUniforms {
-    view_proj: [[f32; 4]; 4],
+struct Uniforms {
+    screen_size: [f32; 2],
 }
 
 pub struct State {
-    #[allow(dead_code)]
-    target_logical_size: (f32, f32),
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     render_pipeline: wgpu::RenderPipeline,
-    // textureとbind_groupをvecにする
     #[allow(dead_code)]
-    empty_texture: Texture,
-    #[allow(dead_code)]
-    textures: Vec<Texture>,
+    texture: texture::Texture,
     #[allow(dead_code)]
     sampler: wgpu::Sampler,
     texture_bind_group: wgpu::BindGroup,
     sampler_bind_group: wgpu::BindGroup,
-    uniform_buffers: [wgpu::Buffer; 2],
-    uniform_bind_groups: [wgpu::BindGroup; 2],
+    #[allow(dead_code)]
+    uniform_buffer: wgpu::Buffer, // 保持しているだけ
+    uniform_bind_group: wgpu::BindGroup,
     instance_buffer: wgpu::Buffer,
-    sprites: Vec<SpriteCharacterInstance>,
-    direction: u32,
-    pattern_count: u32,
-    camera_pos: [f32; 2],
-    scale: f32,
-    degress: f32,
+    sprites: Vec<SpriteInstance>,
     input: InputState,
     window: Arc<Window>,
 }
@@ -60,22 +45,14 @@ pub struct State {
 impl State {
     async fn new(window: Arc<Window>) -> anyhow::Result<State> {
         let size = window.inner_size();
-        // 初期サイズを変換する
-        let target_logical_size = (size.width as f32, size.height as f32);
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            // WindowsなのでDX12 Vulkanだとinstance作成に成功しても
-            // 古いintel内蔵gpuの環境だと次のrequest_device()でアクセス違反になることがある
-            // （たまに起動する）ので素直にDX12
-            // 消費メモリがめちゃくちゃ増えるがWGPUがバージョンアップしたらまたVulkan試してみる
-            backends: wgpu::Backends::DX12,
+            backends: wgpu::Backends::default(),
             flags: Default::default(),
             memory_budget_thresholds: Default::default(),
             backend_options: Default::default(),
             display: Default::default(),
         });
-        // すべてデフォルトだがbackendsもデフォルトになってしまう
-        //let instance = wgpu::Instance::default();
 
         let surface = instance.create_surface(window.clone()).unwrap();
 
@@ -94,30 +71,19 @@ impl State {
         println!("=== WGPU Debug Info ===");
         let limits = adapter.limits();
         println!(
-            "Max sampled textures per shader stage: {}",
-            limits.max_sampled_textures_per_shader_stage
+            "Max texture array layers: {}",
+            limits.max_texture_array_layers
         );
-        println!("Max bind groups: {}", limits.max_bind_groups);
-        println!(
-            "Max bindings per bind group: {}",
-            limits.max_bindings_per_bind_group
-        );
-
-        let max_sampled_textures = Texture::request_max_textures(&limits, 32);
 
         // 探したAdapterからDeviceとQueueを作る
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
-                label: Some("sample02"),                    // デバイス特定のためつけておく
+                label: Some("sample01"),                    // デバイス特定のためつけておく
                 required_features: wgpu::Features::empty(), // 拡張機能不要なのでempty
                 experimental_features: wgpu::ExperimentalFeatures::disabled(), // 実験的機能は不要
-                required_limits: wgpu::Limits {
-                    // テクスチャエントリー数だけ指定
-                    max_sampled_textures_per_shader_stage: max_sampled_textures,
-                    ..wgpu::Limits::default()
-                },
-                memory_hints: Default::default(), // メモリ割り当て方法は標準
-                trace: wgpu::Trace::Off,          // 通常はOff
+                required_limits: wgpu::Limits::default(),   // 限界値は標準の制限値
+                memory_hints: Default::default(),           // メモリ割り当て方法は標準
+                trace: wgpu::Trace::Off,                    // 通常はOff
             })
             .await
             .unwrap();
@@ -146,64 +112,40 @@ impl State {
 
         println!("=======================");
 
-        let empty_texture = Texture::create_empty_texture(&device, &queue);
-        let dragon_bytes: &[u8] = include_bytes!("image/characters/pipo-enemy021.png");
-        let oni_bytes: &[u8] = include_bytes!("image/characters/pipo-enemy019.png");
-        let purin_bytes: &[u8] = include_bytes!("image/characters/cm_001.png");
-        let c_set_bytes = include_bytes!("image/characters/c_set_001.png");
-        let array_bytes = vec![dragon_bytes, oni_bytes, purin_bytes, c_set_bytes];
+        let dragon_bytes: &[u8] = include_bytes!("../../image/characters/pipo-enemy021.png");
+        let oni_bytes: &[u8] = include_bytes!("../../image/characters/pipo-enemy019.png");
+        let array_bytes = vec![dragon_bytes, oni_bytes];
 
-        let mut textures = Vec::with_capacity(array_bytes.len());
-        for bytes in array_bytes.iter() {
-            let texture = Texture::from_bytes(&device, &queue, bytes, "Texture 2D")?;
-            textures.push(texture);
-        }
-
-        // 静的シェーダーを使っている関係で使う数だけにする
-        let texture_count = array_bytes.len() as u32;
-        let mut layout_entries = Vec::with_capacity(texture_count as usize);
-        for i in 0..texture_count {
-            layout_entries.push(wgpu::BindGroupLayoutEntry {
-                binding: i as u32,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    multisampled: false,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                },
-                count: None,
-            });
-        }
+        let array_texture =
+            Texture::from_array_bytes(&device, &queue, array_bytes, "Texture 2D Array")?;
 
         // テクスチャグループレイアウト
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &layout_entries,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT, // フラグメントシェーダーで使う
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    },
+                    count: None,
+                }],
                 label: Some("texture_bind_group_layout"),
             });
-
-        let mut group_entries = Vec::with_capacity(texture_count as usize);
-        for (i, texture) in textures.iter().enumerate() {
-            group_entries.push(wgpu::BindGroupEntry {
-                binding: i as u32,
-                resource: wgpu::BindingResource::TextureView(&texture.view),
-            });
-        }
-        while group_entries.len() < texture_count as usize {
-            group_entries.push(wgpu::BindGroupEntry {
-                binding: group_entries.len() as u32,
-                resource: wgpu::BindingResource::TextureView(&empty_texture.view),
-            });
-        }
 
         // テクスチャバインドグループ
         let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_bind_group_layout,
-            entries: &group_entries,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&array_texture.view),
+            }],
             label: Some("texture_bind_group"),
         });
 
-        let sampler = Texture::create_sampler(&device);
+        let sampler = texture::Texture::create_sampler(&device);
         let mut sampler_layout_entries = Vec::with_capacity(1);
         sampler_layout_entries.push(wgpu::BindGroupLayoutEntry {
             binding: 0,
@@ -258,10 +200,9 @@ impl State {
                 immediate_size: 0,
             });
 
-        // shader_multi_entry.wgsl
         let uniform_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Uniform Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader_multi_entry.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader_texture_2d_array.wgsl").into()),
         });
 
         // Uniformを使用したパイプライン
@@ -272,7 +213,7 @@ impl State {
                 vertex: wgpu::VertexState {
                     module: &uniform_shader,
                     entry_point: Some("vs_main"),
-                    buffers: &[Some(SpriteCharacterInstance::desc())],
+                    buffers: &[Some(SpriteInstance::desc())],
                     compilation_options: Default::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -305,148 +246,51 @@ impl State {
             });
 
         // ユニフォームデータ
-        let uniform: VertexUniforms = VertexUniforms {
-            view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(), // 単位行列で初期化
-        };
-
-        let uniform0 = VertexUniforms {
-            view_proj: glam::camera::rh::proj::directx::orthographic(
-                0.0,
-                target_logical_size.0,
-                target_logical_size.1,
-                0.0,
-                -1.0,
-                1.0,
-            )
-            .to_cols_array_2d(),
+        let uniform: Uniforms = Uniforms {
+            screen_size: [size.width as f32, size.height as f32],
         };
 
         // uniformバッファ
-        let uniform_buffers = [
-            // 0番目は更新しない
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Uniform Buffer 0"),
-                contents: bytemuck::cast_slice(&[uniform0]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            }),
-            // 初期化時は1番目と同じだが更新がかかる
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Uniform Buffer 1"),
-                contents: bytemuck::cast_slice(&[uniform]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            }),
-        ];
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Uniform Buffer"),
+            contents: bytemuck::cast_slice(&[uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
 
         // uniformバインドグループ
-        let uniform_bind_groups = [
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                layout: &uniform_bind_group_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffers[0].as_entire_binding(),
-                }],
-                label: Some("uniform_bind_group 0"),
-            }),
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                layout: &uniform_bind_group_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffers[1].as_entire_binding(),
-                }],
-                label: Some("uniform_bind_group 1"),
-            }),
-        ];
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+            label: Some("uniform_bind_group"),
+        });
 
         let sprites = vec![
-            // スプライト 0（キャラセット1枚目 / 矢印キーで移動・左上原点回転）
-            SpriteCharacterInstance {
-                position: [400.0, 200.0],
-                size: [32.0, 32.0],
-                uv_offset: [0.0, 0.0],
-                uv_size: [
-                    32.0 / textures[3].texture.width() as f32,
-                    32.0 / textures[3].texture.height() as f32,
-                ],
-                texture_index: 3,
-                opacity: 1.0,
-                scale: [1.0, 1.0],
-                rotation: 0.0,
-                pivot: [0.0, 0.0], // 左上原点で回転
-            },
-            // スプライト 1（ドラゴン / 中心を軸に自動回転）
-            SpriteCharacterInstance {
+            // スプライト 1（ドラゴン）
+            SpriteInstance {
                 position: [400.0, 300.0],
                 size: [
-                    textures[0].texture.width() as f32,
-                    textures[0].texture.height() as f32,
+                    array_texture.texture.width() as f32,
+                    array_texture.texture.height() as f32,
                 ],
                 uv_offset: [0.0, 0.0],
                 uv_size: [1.0, 1.0],
                 texture_index: 0,
                 opacity: 1.0,
-                scale: [1.0, 1.0],
-                rotation: 0.0,
-                pivot: [0.5, 0.5], // 中心を軸に回転
             },
-            // スプライト 2（鬼 / 0.5倍縮小・半透明）
-            SpriteCharacterInstance {
+            // スプライト 2（鬼）
+            SpriteInstance {
                 position: [100.0, 100.0],
                 size: [
-                    textures[1].texture.width() as f32,
-                    textures[1].texture.height() as f32,
+                    array_texture.texture.width() as f32,
+                    array_texture.texture.height() as f32,
                 ],
                 uv_offset: [0.0, 0.0],
                 uv_size: [1.0, 1.0],
                 texture_index: 1,
-                opacity: 0.5,
-                scale: [0.5, 0.5], // 0.5倍縮小
-                rotation: 0.0,
-                pivot: [0.5, 0.5],
-            },
-            // スプライト 3（プリン / 45度回転・中心軸）
-            SpriteCharacterInstance {
-                position: [100.0, 400.0],
-                size: [
-                    textures[2].texture.width() as f32,
-                    textures[2].texture.height() as f32,
-                ],
-                uv_offset: [0.0, 0.0],
-                uv_size: [1.0, 1.0],
-                texture_index: 2,
                 opacity: 1.0,
-                scale: [1.0, 1.0],
-                rotation: std::f32::consts::FRAC_PI_4, // 45度
-                pivot: [0.5, 0.5],
-            },
-            // スプライト 4（プリン / 2倍拡大・右端を軸に回転）
-            SpriteCharacterInstance {
-                position: [200.0, 400.0],
-                size: [
-                    textures[2].texture.width() as f32,
-                    textures[2].texture.height() as f32,
-                ],
-                uv_offset: [0.0, 0.0],
-                uv_size: [1.0, 1.0],
-                texture_index: 2,
-                opacity: 1.0,
-                scale: [2.0, 2.0], // 2倍拡大
-                rotation: 0.0,
-                pivot: [1.0, 0.5], // 右端中央を軸
-            },
-            // スプライト 5（キャラセット1枚目 / マップの影響をうけないやつ）
-            SpriteCharacterInstance {
-                position: [target_logical_size.0 / 2.0, target_logical_size.1 / 2.0],
-                size: [32.0, 32.0],
-                uv_offset: [96.0 / textures[3].texture.width() as f32, 0.0],
-                uv_size: [
-                    32.0 / textures[3].texture.width() as f32,
-                    32.0 / textures[3].texture.height() as f32,
-                ],
-                texture_index: 3,
-                opacity: 1.0,
-                scale: [1.0, 1.0],
-                rotation: 0.0,
-                pivot: [0.0, 0.0], // 左上原点で回転
             },
         ];
 
@@ -458,26 +302,19 @@ impl State {
         });
 
         Ok(Self {
-            target_logical_size,
             surface,
             device,
             queue,
             config,
-            empty_texture,
-            textures,
+            texture: array_texture,
             sampler,
             texture_bind_group,
             sampler_bind_group,
             render_pipeline: uniform_render_pipeline,
-            uniform_buffers,
-            uniform_bind_groups,
+            uniform_buffer,
+            uniform_bind_group,
             instance_buffer,
             sprites,
-            direction: 0,
-            pattern_count: 0,
-            camera_pos: [target_logical_size.0 / 2.0, target_logical_size.1 / 2.0],
-            scale: 1.0,
-            degress: 0.0,
             input: InputState::default(),
             window,
         })
@@ -517,123 +354,18 @@ impl State {
     }
 
     fn update(&mut self) {
-        self.update_input();
-        self.pattern_count = (self.pattern_count + 1) % 60;
-
-        let pattern = (self.pattern_count / 15) as usize;
-        let pattern_table: [u32; 4] = [1, 2, 1, 0];
-        self.sprites[0].uv_offset[0] =
-            (32.0 * pattern_table[pattern] as f32) / self.textures[3].texture.width() as f32;
-
-        // スプライト 1（ドラゴン）: 中心軸で自動回転
-        self.sprites[1].rotation += 0.02;
-        if self.sprites[1].rotation >= std::f32::consts::TAU {
-            self.sprites[1].rotation -= std::f32::consts::TAU;
-        }
-
-        // スプライト 4（プリン）: 右端軸で自動回転
-        self.sprites[4].rotation += 0.01;
-        if self.sprites[4].rotation >= std::f32::consts::TAU {
-            self.sprites[4].rotation -= std::f32::consts::TAU;
-        }
-
-        let mut sorted_sprites: Vec<&SpriteCharacterInstance> = self.sprites.iter().collect();
-        // 高さの順のソート、回転は考慮しない
-        // 最後の要素は対象外（0から数えているので6個ある）
-        sorted_sprites[0..5].sort_by(|a, b| a.position[1].partial_cmp(&b.position[1]).unwrap());
-
-        // 毎フレームGPUバッファを更新
-        let mut bytes = Vec::with_capacity(
-            sorted_sprites.len() * std::mem::size_of::<SpriteCharacterInstance>(),
-        );
-        for sprite in &sorted_sprites {
-            // 各参照の示す実体を u8 のスライスに変換して結合
-            bytes.extend_from_slice(bytemuck::bytes_of(*sprite));
-        }
-        self.queue.write_buffer(&self.instance_buffer, 0, &bytes);
-
-        // --- カメラ行列の計算と VertexUniform 更新 ---
-        // 実際はmapで計算したview_proj行列をGPUバッファに書き込む
-        let proj = glam::camera::rh::proj::directx::orthographic(
-            0.0,
-            self.target_logical_size.0,
-            self.target_logical_size.1,
-            0.0,
-            -1.0,
-            1.0,
-        );
-        let half_logical_w = self.target_logical_size.0 / 2.0;
-        let half_logical_h = self.target_logical_size.1 / 2.0;
-        let rotation = self.degress.to_radians();
-        let view =
-            glam::Mat4::from_translation(glam::Vec3::new(half_logical_w, half_logical_h, 0.0))
-                * glam::Mat4::from_rotation_z(rotation)
-                * glam::Mat4::from_scale(glam::Vec3::new(self.scale, self.scale, 1.0))
-                * glam::Mat4::from_translation(glam::Vec3::new(
-                    -self.camera_pos[0],
-                    -self.camera_pos[1],
-                    0.0,
-                ));
-        let view_proj = proj * view;
-        let uniform = VertexUniforms {
-            view_proj: view_proj.to_cols_array_2d(),
-        };
-        // Uniform バッファに書き込み
-        self.queue.write_buffer(
-            &self.uniform_buffers[1],
-            0,
-            bytemuck::cast_slice(&[uniform]),
-        );
-    }
-
-    fn update_input(&mut self) {
-        if self.input.reset {
-            // マップの左上の中心に表示が[0.0, 0.0]となる
-            self.camera_pos = [
-                self.target_logical_size.0 / 2.0,
-                self.target_logical_size.1 / 2.0,
-            ];
-            self.scale = 1.0;
-            self.degress = 0.0;
-            return;
-        }
-
         let speed = 2.0;
         let [dx, dy] = self.input.direction();
 
         if dx != 0.0 || dy != 0.0 {
             self.sprites[0].position[0] += dx * speed;
             self.sprites[0].position[1] += dy * speed;
-            // スプライトの方向やアニメーションなどの座標はcpu側で設定する
-            self.direction = if dx > 0.0 {
-                2
-            } else if dx < 0.0 {
-                1
-            } else if dy > 0.0 {
-                0
-            } else if dy < 0.0 {
-                3
-            } else {
-                self.direction
-            };
-            self.sprites[0].uv_offset[1] =
-                32.0 * self.direction as f32 / self.textures[3].texture.height() as f32;
-        }
 
-        // 値がずれないように２の負のべき乗単位で拡大縮小する
-        if self.input.plus {
-            self.scale += 0.0625;
-        } else if self.input.minus {
-            if self.scale > 0.125 {
-                self.scale -= 0.0625;
-                self.scale = self.scale.max(0.125);
-            }
-        }
-
-        if self.input.rotation_l {
-            self.degress = (self.degress + 360.0 - 4.0) % 360.0;
-        } else if self.input.rotation_r {
-            self.degress = (self.degress + 4.0) % 360.0;
+            self.queue.write_buffer(
+                &self.instance_buffer,
+                0,
+                bytemuck::cast_slice(&self.sprites),
+            );
         }
     }
 
@@ -699,19 +431,12 @@ impl State {
 
             // パイプライン設定
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.uniform_bind_groups[1], &[]);
+            render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             render_pass.set_bind_group(1, &self.texture_bind_group, &[]);
             render_pass.set_bind_group(2, &self.sampler_bind_group, &[]);
             // ここでキャラ全部のintanceを流し込む
             render_pass.set_vertex_buffer(0, self.instance_buffer.slice(..));
-            render_pass.draw(0..4, 0..(self.sprites.len() - 1) as u32);
-
-            // マップの影響を受けないやつ
-            render_pass.set_bind_group(0, &self.uniform_bind_groups[0], &[]);
-            render_pass.draw(
-                0..4,
-                (self.sprites.len() - 1) as u32..self.sprites.len() as u32,
-            );
+            render_pass.draw(0..4, 0..self.sprites.len() as u32);
         }
 
         // コマンドを実行
@@ -736,7 +461,7 @@ impl App {
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window_attributes = Window::default_attributes()
-            .with_inner_size(winit::dpi::PhysicalSize::new(960, 540))
+            .with_inner_size(winit::dpi::PhysicalSize::new(800, 600))
             .with_visible(false);
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         window.set_visible(true);

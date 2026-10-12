@@ -9,7 +9,7 @@ use winit::{
     window::Window,
 };
 
-use crate::{
+use crate::sub::{
     key::InputState,
     sprite::SpriteInstance,
     texture::{self, Texture},
@@ -17,59 +17,9 @@ use crate::{
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct TexVertex {
-    position: [f32; 2],
-    tex_coords: [f32; 2],
-}
-
-impl TexVertex {
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<TexVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0, // @location(0) にあたる
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress, // 前までのサイズ分進む
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-            ],
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Uniforms {
     screen_size: [f32; 2],
 }
-
-// 頂点データは 0.0 ~ 1.0 の矩形にする
-const VERTICES_LOCAL: &[TexVertex] = &[
-    TexVertex {
-        position: [0.0, 0.0],
-        tex_coords: [0.0, 0.0],
-    }, // 左上
-    TexVertex {
-        position: [0.0, 1.0],
-        tex_coords: [0.0, 1.0],
-    }, // 左下
-    TexVertex {
-        position: [1.0, 1.0],
-        tex_coords: [1.0, 1.0],
-    }, // 右下
-    TexVertex {
-        position: [1.0, 0.0],
-        tex_coords: [1.0, 0.0],
-    }, // 右上
-];
-
-const INDICES: &[u16] = &[0, 1, 3, 1, 2, 3];
 
 pub struct State {
     surface: wgpu::Surface<'static>,
@@ -77,15 +27,12 @@ pub struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     render_pipeline: wgpu::RenderPipeline,
-    vertex4_buffer: wgpu::Buffer,
-    index4_buffer: wgpu::Buffer,
-    num_indices: u32,
-    // textureとbind_groupをvecにする
     #[allow(dead_code)]
-    texture: texture::Texture,
+    textures: Vec<Texture>,
     #[allow(dead_code)]
     sampler: wgpu::Sampler,
     texture_bind_group: wgpu::BindGroup,
+    sampler_bind_group: wgpu::BindGroup,
     #[allow(dead_code)]
     uniform_buffer: wgpu::Buffer, // 保持しているだけ
     uniform_bind_group: wgpu::BindGroup,
@@ -100,14 +47,12 @@ impl State {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
+            backends: wgpu::Backends::default(),
             flags: Default::default(),
             memory_budget_thresholds: Default::default(),
             backend_options: Default::default(),
             display: Default::default(),
         });
-        // すべてデフォルトだがbackendsもデフォルトになってしまう
-        //let instance = wgpu::Instance::default();
 
         let surface = instance.create_surface(window.clone()).unwrap();
 
@@ -126,19 +71,27 @@ impl State {
         println!("=== WGPU Debug Info ===");
         let limits = adapter.limits();
         println!(
-            "Max texture array layers: {}",
-            limits.max_texture_array_layers
+            "Max binding array elements: {}",
+            limits.max_binding_array_elements_per_shader_stage
         );
+        let max_binding_array_elements =
+            std::cmp::min(64, limits.max_binding_array_elements_per_shader_stage);
 
         // 探したAdapterからDeviceとQueueを作る
+        // bindingを拡張する
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
-                label: Some("sample01"),                    // デバイス特定のためつけておく
-                required_features: wgpu::Features::empty(), // 拡張機能不要なのでempty
+                label: Some("sample02"), // デバイス特定のためつけておく
+                required_features: wgpu::Features::TEXTURE_BINDING_ARRAY
+                    | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(), // 実験的機能は不要
-                required_limits: wgpu::Limits::default(),   // 限界値は標準の制限値
-                memory_hints: Default::default(),           // メモリ割り当て方法は標準
-                trace: wgpu::Trace::Off,                    // 通常はOff
+                required_limits: wgpu::Limits {
+                    // バインド要素数だけ指定
+                    max_binding_array_elements_per_shader_stage: max_binding_array_elements,
+                    ..wgpu::Limits::default()
+                },
+                memory_hints: Default::default(), // メモリ割り当て方法は標準
+                trace: wgpu::Trace::Off,          // 通常はOff
             })
             .await
             .unwrap();
@@ -158,7 +111,7 @@ impl State {
             format: surface_format,                        // surface_capsから決定したフォーマット
             width: size.width,                             // ウィンドウ内部の幅
             height: size.height,                           // ウィンドウ内部の高さ
-            present_mode: surface_caps.present_modes[0], // 垂直同期などの表示モード（利用可能な最初のモード）
+            present_mode: wgpu::PresentMode::default(),    // 垂直同期
             alpha_mode: surface_caps.alpha_modes[0], // ウィンドウ背後との合成モード（利用可能な最初のモード）
             view_formats: vec![],                    // ビューフォーマットの追加設定（空）
             desired_maximum_frame_latency: 2,        // 最大フレームレイテンシ
@@ -167,52 +120,72 @@ impl State {
 
         println!("=======================");
 
-        let dragon_bytes: &[u8] = include_bytes!("image/characters/pipo-enemy021.png");
-        let oni_bytes: &[u8] = include_bytes!("image/characters/pipo-enemy019.png");
-        let array_bytes = vec![dragon_bytes, oni_bytes];
+        let dragon_bytes: &[u8] = include_bytes!("../../image/characters/pipo-enemy021.png");
+        let oni_bytes: &[u8] = include_bytes!("../../image/characters/pipo-enemy019.png");
+        let purin_bytes: &[u8] = include_bytes!("../../image/characters/cm_001.png");
+        let array_bytes = vec![dragon_bytes, oni_bytes, purin_bytes];
 
-        let array_texture =
-            Texture::from_array_bytes(&device, &queue, array_bytes, "Texture 2D Array")?;
-        let sampler = Texture::create_sampler(&device);
+        let mut textures = Vec::with_capacity(array_bytes.len());
+        for bytes in array_bytes.iter() {
+            let texture = Texture::from_bytes(&device, &queue, bytes, "Texture 2D")?;
+            textures.push(texture);
+        }
 
         // テクスチャグループレイアウト
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT, // フラグメントシェーダーで使う
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2Array,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        },
-                        count: None,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT, // フラグメントシェーダーで使う
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                        count: None,
-                    },
-                ],
+                    count: Some(std::num::NonZeroU32::new(3).unwrap()),
+                }],
                 label: Some("texture_bind_group_layout"),
             });
 
         // テクスチャバインドグループ
         let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&array_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureViewArray(&[
+                    &textures[0].view,
+                    &textures[1].view,
+                    &textures[2].view,
+                ]),
+            }],
             label: Some("texture_bind_group"),
+        });
+
+        let sampler = texture::Texture::create_sampler(&device);
+        let mut sampler_layout_entries = Vec::with_capacity(1);
+        sampler_layout_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+            count: None,
+        });
+
+        let sampler_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &sampler_layout_entries,
+                label: Some("sampler_bind_group_layout"),
+            });
+
+        let mut sampler_group_entries = Vec::with_capacity(1);
+        sampler_group_entries.push(wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::Sampler(&sampler),
+        });
+
+        let sampler_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &sampler_bind_group_layout,
+            entries: &sampler_group_entries,
+            label: Some("sampler_bind_group"),
         });
 
         // ユニフォームグループレイアウト
@@ -236,15 +209,16 @@ impl State {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
-                    Some(&texture_bind_group_layout),
                     Some(&uniform_bind_group_layout),
+                    Some(&texture_bind_group_layout),
+                    Some(&sampler_bind_group_layout),
                 ], // グループレイアウトをバインド
                 immediate_size: 0,
             });
 
         let uniform_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Uniform Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader_2d_array.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader_texture_bindless.wgsl").into()),
         });
 
         // Uniformを使用したパイプライン
@@ -255,7 +229,7 @@ impl State {
                 vertex: wgpu::VertexState {
                     module: &uniform_shader,
                     entry_point: Some("vs_main"),
-                    buffers: &[Some(TexVertex::desc()), Some(SpriteInstance::desc())],
+                    buffers: &[Some(SpriteInstance::desc())],
                     compilation_options: Default::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -269,7 +243,7 @@ impl State {
                     compilation_options: Default::default(),
                 }),
                 primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
                     strip_index_format: None,
                     front_face: wgpu::FrontFace::Ccw,
                     cull_mode: Some(wgpu::Face::Back),
@@ -286,12 +260,6 @@ impl State {
                 multiview_mask: None,
                 cache: None,
             });
-
-        let index4_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
 
         // ユニフォームデータ
         let uniform: Uniforms = Uniforms {
@@ -315,19 +283,13 @@ impl State {
             label: Some("uniform_bind_group"),
         });
 
-        let vertex_local_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Local Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTICES_LOCAL),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
         let sprites = vec![
             // スプライト 1（ドラゴン）
             SpriteInstance {
                 position: [400.0, 300.0],
                 size: [
-                    array_texture.texture.width() as f32,
-                    array_texture.texture.height() as f32,
+                    textures[0].texture.width() as f32,
+                    textures[0].texture.height() as f32,
                 ],
                 uv_offset: [0.0, 0.0],
                 uv_size: [1.0, 1.0],
@@ -338,12 +300,24 @@ impl State {
             SpriteInstance {
                 position: [100.0, 100.0],
                 size: [
-                    array_texture.texture.width() as f32,
-                    array_texture.texture.height() as f32,
+                    textures[1].texture.width() as f32,
+                    textures[1].texture.height() as f32,
                 ],
                 uv_offset: [0.0, 0.0],
                 uv_size: [1.0, 1.0],
                 texture_index: 1,
+                opacity: 1.0,
+            },
+            // スプライト 2（へなへなプリン）
+            SpriteInstance {
+                position: [100.0, 400.0],
+                size: [
+                    textures[2].texture.width() as f32,
+                    textures[2].texture.height() as f32,
+                ],
+                uv_offset: [0.0, 0.0],
+                uv_size: [1.0, 1.0],
+                texture_index: 2,
                 opacity: 1.0,
             },
         ];
@@ -355,20 +329,16 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
-        let num_indices = INDICES.len() as u32;
-
         Ok(Self {
             surface,
             device,
             queue,
             config,
-            index4_buffer,
-            num_indices,
-            texture: array_texture,
+            textures,
             sampler,
             texture_bind_group,
+            sampler_bind_group,
             render_pipeline: uniform_render_pipeline,
-            vertex4_buffer: vertex_local_buffer,
             uniform_buffer,
             uniform_bind_group,
             instance_buffer,
@@ -489,13 +459,12 @@ impl State {
 
             // パイプライン設定
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.texture_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex4_buffer.slice(..));
+            render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.texture_bind_group, &[]);
+            render_pass.set_bind_group(2, &self.sampler_bind_group, &[]);
             // ここでキャラ全部のintanceを流し込む
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_index_buffer(self.index4_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.sprites.len() as u32);
+            render_pass.set_vertex_buffer(0, self.instance_buffer.slice(..));
+            render_pass.draw(0..4, 0..self.sprites.len() as u32);
         }
 
         // コマンドを実行

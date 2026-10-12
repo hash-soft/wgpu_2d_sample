@@ -6,6 +6,7 @@ pub struct SpriteInstance {
     pub uv_offset: [f32; 2], // 切り出しUVオフセット
     pub uv_size: [f32; 2],   // 切り出しUVサイズ
     pub texture_index: u32,
+    pub opacity: f32, // 透過度
 }
 
 impl SpriteInstance {
@@ -44,6 +45,11 @@ impl SpriteInstance {
                     shader_location: 4,
                     format: wgpu::VertexFormat::Uint32,
                 },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 9]>() as wgpu::BufferAddress,
+                    shader_location: 5,
+                    format: wgpu::VertexFormat::Float32,
+                }, // opacity
             ],
         }
     }

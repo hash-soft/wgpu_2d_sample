@@ -117,8 +117,8 @@ impl State {
         };
 
         let empty_texture = Texture::create_empty_texture(&device, &queue);
-        let frame_bytes: &[u8] = include_bytes!("image/window/WindowBase_blue.png");
-        let dragon_bytes: &[u8] = include_bytes!("image/characters/pipo-enemy021.png");
+        let frame_bytes: &[u8] = include_bytes!("../../image/window/WindowBase_blue.png");
+        let dragon_bytes: &[u8] = include_bytes!("../../image/characters/pipo-enemy021.png");
         let array_bytes = vec![frame_bytes, dragon_bytes];
 
         let mut textures = Vec::with_capacity(array_bytes.len());
@@ -390,7 +390,7 @@ impl State {
         let mut selectable_fonts = Vec::new();
         let mut font_system = FontSystem::new();
         // メッセージに適したフォントを使う
-        let font_data_gen = include_bytes!("fonts/GenEiPOPlePw-Bk.ttf");
+        let font_data_gen = include_bytes!("../../fonts/GenEiPOPlePw-Bk.ttf");
         let font_gen = CustomFont::load_font(&mut font_system, font_data_gen.to_vec()).unwrap();
         selectable_fonts.push(font_gen);
 
@@ -468,6 +468,7 @@ impl State {
             uv_offset: [0.0, 0.0],
             uv_size: [1.0, 1.0],
             texture_index: 0,
+            opacity: 1.0,
         }];
 
         let character_instance_buffer =
