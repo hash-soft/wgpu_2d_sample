@@ -1,5 +1,6 @@
 use sample02_composite::{
-    run_load_tilemap, run_move_character, run_tilemap_instanced, run_tilemap_multi_indices,
+    run_load_tilemap, run_move_character, run_multi_window, run_tilemap_instanced,
+    run_tilemap_multi_indices,
 };
 
 fn main() -> anyhow::Result<()> {
@@ -19,6 +20,7 @@ fn main() -> anyhow::Result<()> {
                 match arg.as_str() {
                     "move_character" => 0, // キャラチップ移動
                     "load_tilemap" => 1,   // タイルマップ読み込み
+                    "multi_window" => 2,   // マルチウィンドウ（準備中）
 
                     "tilemap_multi_indices" => 10, // 未精査
                     "tilemap_instanced" => 11,     // 未精査
@@ -36,9 +38,10 @@ fn main() -> anyhow::Result<()> {
     match run_id {
         0 => run_move_character::run(),
         1 => run_load_tilemap::run(),
+        2 => run_multi_window::run(),
 
         10 => run_tilemap_multi_indices::run(),
         11 => run_tilemap_instanced::run(),
-        _ => run_move_character::run(),
+        _ => run_multi_window::run(),
     }
 }

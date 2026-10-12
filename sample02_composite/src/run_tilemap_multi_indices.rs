@@ -9,7 +9,7 @@ use winit::{
     window::Window,
 };
 
-use crate::{
+use crate::sub::{
     key::InputState,
     texture::{DynamicShader, Texture},
 };
@@ -205,8 +205,8 @@ impl State {
 
         // 複数テクスチャのロードと準備
         let empty_texture = Texture::create_empty_texture(&device, &queue);
-        let world_bytes: &[u8] = include_bytes!("image/tilesets/world.png");
-        let upper_bytes: &[u8] = include_bytes!("image/tilesets/upper.png");
+        let world_bytes: &[u8] = include_bytes!("../../image/tilesets/world.png");
+        let upper_bytes: &[u8] = include_bytes!("../../image/tilesets/upper.png");
         let array_bytes = vec![world_bytes, upper_bytes];
 
         let mut textures = Vec::with_capacity(array_bytes.len());

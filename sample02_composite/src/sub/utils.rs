@@ -1,6 +1,7 @@
-use crate::tiled_map::TiledMap;
 use anyhow::Result;
 use std::fs;
+
+use crate::sub::tiled_map::TiledMap;
 
 #[macro_export]
 macro_rules! load_map_static {
@@ -10,7 +11,7 @@ macro_rules! load_map_static {
         let json_str = include_str!($path);
 
         // serde_jsonでデシリアライズ
-        let tiled_map: crate::tiled_map::TiledMap = serde_json::from_str(json_str)?;
+        let tiled_map: crate::sub::tiled_map::TiledMap = serde_json::from_str(json_str)?;
         anyhow::Ok(tiled_map)
     }};
 }

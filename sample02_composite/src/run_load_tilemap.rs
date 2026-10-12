@@ -16,11 +16,13 @@ use winit::{
 };
 
 use crate::{
-    key::InputState,
     load_map_static,
-    map_data::MapData,
-    texture::Texture,
-    tile::{TileDrawGroup, TileInstance},
+    sub::{
+        key::InputState,
+        map_data::MapData,
+        texture::Texture,
+        tile::{TileDrawGroup, TileInstance},
+    },
 };
 
 #[repr(C)]
@@ -121,9 +123,9 @@ impl State {
             device.limits().min_uniform_buffer_offset_alignment
         );
 
-        let world = load_map_static!("json/map_world.json")?;
+        let world = load_map_static!("../../json/map_world.json")?;
         let map_data_1 = MapData::from_tiled_map(&world).unwrap();
-        let town = load_map_static!("json/map_town.json")?;
+        let town = load_map_static!("../../json/map_town.json")?;
         let map_data_2 = MapData::from_tiled_map(&town).unwrap();
         let map_data_list = vec![map_data_1, map_data_2];
 
@@ -148,9 +150,9 @@ impl State {
 
         // 複数テクスチャのロードと準備
         let empty_texture = Texture::create_empty_texture(&device, &queue);
-        let world_bytes: &[u8] = include_bytes!("image/tilesets/world.png");
-        let ground_bytes: &[u8] = include_bytes!("image/tilesets/ground.png");
-        let upper_bytes: &[u8] = include_bytes!("image/tilesets/upper.png");
+        let world_bytes: &[u8] = include_bytes!("../../image/tilesets/world.png");
+        let ground_bytes: &[u8] = include_bytes!("../../image/tilesets/ground.png");
+        let upper_bytes: &[u8] = include_bytes!("../../image/tilesets/upper.png");
         let array_bytes = vec![world_bytes, ground_bytes, upper_bytes]; // テクスチャを増やす場合は要素を追加
 
         let mut textures = Vec::with_capacity(array_bytes.len());

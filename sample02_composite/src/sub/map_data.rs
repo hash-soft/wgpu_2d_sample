@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::tiled_map::TiledMap;
+use crate::sub::tiled_map::TiledMap;
 
 #[derive(Debug)]
 pub struct MapData {

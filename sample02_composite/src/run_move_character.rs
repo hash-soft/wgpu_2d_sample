@@ -19,7 +19,7 @@ use winit::{
     window::Window,
 };
 
-use crate::{key::InputState, sprite::SpriteCharacterInstance, texture::Texture};
+use crate::sub::{key::InputState, sprite::SpriteCharacterInstance, texture::Texture};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -146,10 +146,10 @@ impl State {
         println!("=======================");
 
         let empty_texture = Texture::create_empty_texture(&device, &queue);
-        let dragon_bytes: &[u8] = include_bytes!("image/characters/pipo-enemy021.png");
-        let oni_bytes: &[u8] = include_bytes!("image/characters/pipo-enemy019.png");
-        let purin_bytes: &[u8] = include_bytes!("image/characters/cm_001.png");
-        let c_set_bytes = include_bytes!("image/characters/c_set_001.png");
+        let dragon_bytes: &[u8] = include_bytes!("../../image/characters/pipo-enemy021.png");
+        let oni_bytes: &[u8] = include_bytes!("../../image/characters/pipo-enemy019.png");
+        let purin_bytes: &[u8] = include_bytes!("../../image/characters/cm_001.png");
+        let c_set_bytes = include_bytes!("../../image/characters/c_set_001.png");
         let array_bytes = vec![dragon_bytes, oni_bytes, purin_bytes, c_set_bytes];
 
         let mut textures = Vec::with_capacity(array_bytes.len());
