@@ -31,27 +31,12 @@ impl Texture {
     }
 
     pub fn create_empty_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
-        let size = wgpu::Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1,
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let texture = Self::create_texture(device, 1, 1, false);
 
         // 透明色 (0, 0, 0, 0) または黒などで初期化
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
-                texture: &texture,
+                texture: &texture.texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -62,8 +47,45 @@ impl Texture {
                 bytes_per_row: Some(4),
                 rows_per_image: Some(1),
             },
-            size,
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
         );
+
+        texture
+    }
+
+    pub fn create_texture(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        is_offscreen: bool,
+    ) -> Self {
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let usage = if is_offscreen {
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC
+        } else {
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         Self { texture, view }
     }

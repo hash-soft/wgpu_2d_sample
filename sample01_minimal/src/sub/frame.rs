@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use crate::sub::sprite::SpriteInstance;
 
 #[repr(C)]
@@ -9,11 +7,17 @@ pub struct FrameInstance {
     pub z: f32,
 }
 
-impl Deref for FrameInstance {
+impl std::ops::Deref for FrameInstance {
     type Target = SpriteInstance;
 
     fn deref(&self) -> &Self::Target {
         &self.base
+    }
+}
+
+impl std::ops::DerefMut for FrameInstance {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.base
     }
 }
 
