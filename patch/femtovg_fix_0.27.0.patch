@@ -1,0 +1,90 @@
+diff --git a/vendor/femtovg-0.27.0/src/geometry.rs b/vendor/femtovg/src/geometry.rs
+index 3700e51..c88ecd7 100644
+--- a/vendor/femtovg-0.27.0/src/geometry.rs
++++ b/vendor/femtovg/src/geometry.rs
+@@ -345,6 +345,7 @@ impl Transform2D {
+     /// `epsilon` is the tolerance for the off-diagonal terms being zero and for
+     /// the two diagonal terms being equal. A pure translation reports a scale of
+     /// `1.0`.
++    #[allow(dead_code)]
+     pub(crate) fn as_uniform_scale_translation(&self, epsilon: f32) -> Option<(f32, f32, f32)> {
+         let &Self([a, b, c, d, tx, ty]) = self;
+         let is_uniform =
+@@ -500,11 +501,7 @@ impl Rect {
+         let h = (self.y + self.h).min(other.y + other.h) - y;
+ 
+         let result = Self { x, y, w, h };
+-        if result.is_empty() {
+-            None
+-        } else {
+-            Some(result)
+-        }
++        if result.is_empty() { None } else { Some(result) }
+     }
+ 
+     pub fn is_empty(&self) -> bool {
+diff --git a/vendor/femtovg-0.27.0/src/lib.rs b/vendor/femtovg/src/lib.rs
+index 6500703..b71019c 100644
+--- a/vendor/femtovg-0.27.0/src/lib.rs
++++ b/vendor/femtovg/src/lib.rs
+@@ -2163,20 +2163,20 @@ where
+         let mut text_context = text_context.borrow_mut();
+ 
+         // How this glyph run is rasterized for the current canvas transform.
+-        #[derive(Clone, Copy)]
+-        enum Rasterization {
+-            Path,
+-            Atlas,
+-            ScaledAtlas {
+-                scale: f32,
+-                true_scale: f32,
+-                translation: (f32, f32),
+-            },
+-        }
++        // #[derive(Clone, Copy)]
++        // enum Rasterization {
++        //     Path,
++        //     Atlas,
++        //     ScaledAtlas {
++        //         scale: f32,
++        //         true_scale: f32,
++        //         translation: (f32, f32),
++        //     },
++        // }
+ 
+         // Classify the canvas transform. 1e-3 epsilon: tight enough to catch any
+         // intentional transform, loose enough to tolerate matrix-op drift.
+-        let rasterization = match self.state().transform.as_uniform_scale_translation(1e-3) {
++        /*let rasterization = match self.state().transform.as_uniform_scale_translation(1e-3) {
+             // Rotation / skew / non-uniform / negative scale: outline rendering.
+             None => Rasterization::Path,
+             Some((true_scale, tx, ty)) => {
+@@ -2208,7 +2208,9 @@ where
+         let effective_scale = match rasterization {
+             Rasterization::ScaledAtlas { scale, .. } => scale,
+             _ => 1.0,
+-        };
++        };*/
++        let need_direct_rendering = true;
++        let effective_scale = 1.0;
+         let effective_font_size = paint.text.font_size * effective_scale;
+ 
+         // Everything measured in user text space crosses into the rasterizer's
+@@ -2335,7 +2337,7 @@ where
+         // only draw_glyph_commands (which applies the canvas transform) needs the
+         // swap — and since it is infallible, the transform is always restored even
+         // though the fallible rendering above used `?`.
+-        match rasterization {
++        /*match rasterization {
+             Rasterization::ScaledAtlas {
+                 scale,
+                 true_scale,
+@@ -2354,7 +2356,7 @@ where
+                 self.state_mut().transform = saved;
+             }
+             _ => self.draw_glyph_commands(draw_commands, paint),
+-        }
++        }*/
+ 
+         Ok(())
+     }

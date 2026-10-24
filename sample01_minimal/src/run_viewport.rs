@@ -17,8 +17,6 @@ struct Uniforms {
     screen_size: [f32; 2],
 }
 
-const INDICES: &[u16] = &[0, 1, 3, 1, 2, 3];
-
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
@@ -47,7 +45,7 @@ impl Vertex {
     }
 }
 
-// 画面全体に配置 左上から下に進み1週する
+// 画面全体に配置
 const VERTICES4: &[Vertex] = &[
     Vertex {
         position: [-1.0, 1.0, 0.0],
@@ -58,22 +56,21 @@ const VERTICES4: &[Vertex] = &[
         color: [0.0, 1.0, 0.0],
     }, // B
     Vertex {
-        position: [1.0, -1.0, 0.0],
-        color: [1.0, 0.0, 0.0],
-    }, // C
-    Vertex {
         position: [1.0, 1.0, 0.0],
         color: [0.0, 0.0, 1.0],
     }, // D
+    Vertex {
+        position: [1.0, -1.0, 0.0],
+        color: [1.0, 0.0, 0.0],
+    }, // C
 ];
+// 四角形１つなのでINDICESは使っていない
 
 pub struct State {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    index4_buffer: wgpu::Buffer,
-    num_indices: u32,
     #[allow(dead_code)]
     diffuse_texture: texture::Texture, // 現在は使っていない
     #[allow(dead_code)]
@@ -298,12 +295,6 @@ impl State {
                 cache: None,
             });
 
-        let index4_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
         // ユニフォームデータ
         let min_size = size.width.min(size.height);
         let uniform: Uniforms = Uniforms {
@@ -361,8 +352,6 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
-        let num_indices = INDICES.len() as u32;
-
         // 矩形バッファ
         let shader_buffer = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Dyn Shader"),
@@ -402,7 +391,7 @@ impl State {
                     compilation_options: Default::default(),
                 }),
                 primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
                     strip_index_format: None,
                     front_face: wgpu::FrontFace::Ccw,
                     cull_mode: Some(wgpu::Face::Back),
@@ -432,8 +421,6 @@ impl State {
             device,
             queue,
             config,
-            index4_buffer,
-            num_indices,
             diffuse_texture,
             sampler,
             diffuse_bind_group,
@@ -577,8 +564,7 @@ impl State {
             // パイプライン設定
             render_pass.set_pipeline(&self.buffer_render_pipeline);
             render_pass.set_vertex_buffer(0, self.vertex4_buffer.slice(..));
-            render_pass.set_index_buffer(self.index4_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
+            render_pass.draw(0..4, 0..1);
 
             render_pass.set_pipeline(&self.uniform_render_pipeline);
             render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);

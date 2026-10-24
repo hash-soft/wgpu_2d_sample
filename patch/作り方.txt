@@ -1,0 +1,6 @@
+１．パッチを作るクレートをvendorに持ってくる
+２．バージョン番号付きとバージョン番号なし版を用意する
+３．バージョン番号なし版のクレートを更新する
+４．次のコマンドを例にパッチを作る
+git diff --no-index vendor/femtovg-0.27.0 vendor/femtovg > patch/femtovg_fix_0.27.0.patch
+５．不要ならバージョン番号付きのクレートを削除する
