@@ -24,9 +24,18 @@ index 3700e51..c88ecd7 100644
  
      pub fn is_empty(&self) -> bool {
 diff --git a/vendor/femtovg-0.27.0/src/lib.rs b/vendor/femtovg/src/lib.rs
-index 6500703..b71019c 100644
+index 6500703..d98310d 100644
 --- a/vendor/femtovg-0.27.0/src/lib.rs
 +++ b/vendor/femtovg/src/lib.rs
+@@ -1220,7 +1220,7 @@ where
+             ));
+             self.verts.push(Vertex::new(
+                 path_cache.bounds.minx - fringe_width,
+-                path_cache.bounds.miny,
++                path_cache.bounds.miny - fringe_width,
+                 0.5,
+                 1.0,
+             ));
 @@ -2163,20 +2163,20 @@ where
          let mut text_context = text_context.borrow_mut();
  

@@ -620,17 +620,18 @@ dependencies = [
 
 [[package]]
 name = "femtovg"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
+ "cfg_aliases",
  "fnv",
  "glow 0.18.0",
  "image",
  "imgref",
  "itertools",
  "log",
- "lru 0.18.5",
+ "lru 0.19.0",
  "rgb",
  "rustybuzz",
  "slotmap",
@@ -1188,9 +1189,9 @@ checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
 
 [[package]]
 name = "lru"
-version = "0.18.5"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
+checksum = "4a9f71e3591c7ec44d3e563e87bf14ddc2bada8519dca046e5b0e560cd004e2d"
 
 [[package]]
 name = "memchr"
@@ -2070,10 +2071,12 @@ dependencies = [
 name = "sample02_composite"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "anyhow",
  "bytemuck",
  "cgmath",
  "env_logger",
+ "femtovg",
  "glam",
  "image",
  "log",

@@ -4,3 +4,7 @@
 ４．次のコマンドを例にパッチを作る
 git diff --no-index vendor/femtovg-0.27.0 vendor/femtovg > patch/femtovg_fix_0.27.0.patch
 ５．不要ならバージョン番号付きのクレートを削除する
+
+適用例
+１．git bashを起動してプロジェクトルートに移動
+２．patch -p1 < patch/femtovg_fix_0.27.0.patch 

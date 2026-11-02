@@ -145,7 +145,7 @@ impl State {
 
         println!("=======================");
 
-        let empty_texture = Texture::create_empty_texture(&device, &queue);
+        let empty_texture = Texture::create_empty_texture(&device, &queue, config.format);
         let dragon_bytes: &[u8] = include_bytes!("../../image/characters/pipo-enemy021.png");
         let oni_bytes: &[u8] = include_bytes!("../../image/characters/pipo-enemy019.png");
         let purin_bytes: &[u8] = include_bytes!("../../image/characters/cm_001.png");
@@ -154,7 +154,7 @@ impl State {
 
         let mut textures = Vec::with_capacity(array_bytes.len());
         for bytes in array_bytes.iter() {
-            let texture = Texture::from_bytes(&device, &queue, bytes, "Texture 2D")?;
+            let texture = Texture::from_bytes(&device, &queue, bytes, config.format, "Texture 2D")?;
             textures.push(texture);
         }
 

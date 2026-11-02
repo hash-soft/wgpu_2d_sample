@@ -1,5 +1,11 @@
 /// マルチウィンドウシステム
-///
+/// todo
+/// - 文字の表示をまとめた処理を作る
+/// - 文字枠をまとめた処理を作る
+/// - 上２つを統合してウィンドウにする
+/// - 深度バッファをつける
+/// - キーで５階層くらいのウィンドウを開く、閉じるをできるようにする
+/// - 流れるメッセージウィンドウを作る
 use std::{iter, sync::Arc, vec};
 use winit::{
     application::ApplicationHandler,
@@ -14,8 +20,10 @@ use crate::{
     sub::{
         key::InputState,
         map_data::MapData,
+        text_renderer::{TextPaint, TextRenderer},
         texture::Texture,
         tile::{TileDrawGroup, TileInstance},
+        utils::{DeviceParams, get_monitor_max_resolution, max_texture_dimension_2d},
     },
 };
 
@@ -46,12 +54,13 @@ struct FragmentUniforms {
 const WORLD_INITIAL_POS: [f32; 2] = [7712.0, 8064.0];
 
 pub struct State {
-    target_logical_size: (f32, f32),
+    device_params: DeviceParams,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     render_pipeline: wgpu::RenderPipeline,
+    depth_texture: Texture,
     #[allow(dead_code)]
     textures: Vec<Texture>,
     #[allow(dead_code)]
@@ -69,14 +78,15 @@ pub struct State {
     map_data_list: Vec<MapData>,
     map_count: u32,
     tile_draw_groups: Vec<TileDrawGroup>,
+    text_renderer: TextRenderer,
     input: InputState,
     window: Arc<Window>,
 }
 
 impl State {
     async fn new(window: Arc<Window>) -> anyhow::Result<State> {
-        let target_logical_size = (800.0, 600.0);
         let size = window.inner_size();
+        let target_logical_size = (size.width as f32, size.height as f32);
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window.clone()).unwrap();
 
@@ -90,10 +100,20 @@ impl State {
             .await
             .unwrap();
 
-        let limits = adapter.limits();
+        let monitor_size = get_monitor_max_resolution(&window).unwrap_or((1920, 1080));
+        println!("monitor_size: {:?}", monitor_size);
+
+        let adapter_limits = adapter.limits();
+        let max_texture_dimension_2d = max_texture_dimension_2d(
+            &window,
+            wgpu::Limits::default().max_texture_dimension_2d,
+            adapter_limits.max_texture_dimension_2d,
+        );
+        println!("max_texture_dimension_2d: {}", max_texture_dimension_2d);
+
         // テクスチャ8枚
         // スプライトのほうが多いからスプライトのレイアウトを使いまわせばいいか
-        let max_textures = Texture::request_max_textures(&limits, 8);
+        let max_textures = Texture::request_max_textures(&adapter_limits, 8);
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -102,6 +122,7 @@ impl State {
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 required_limits: wgpu::Limits {
                     max_sampled_textures_per_shader_stage: max_textures,
+                    max_texture_dimension_2d: max_texture_dimension_2d,
                     ..wgpu::Limits::default()
                 },
                 memory_hints: Default::default(),
@@ -126,6 +147,7 @@ impl State {
             .copied()
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -139,13 +161,13 @@ impl State {
         };
 
         // 複数テクスチャのロードと準備
-        let empty_texture = Texture::create_empty_texture(&device, &queue);
+        let empty_texture = Texture::create_empty_texture(&device, &queue, config.format);
         let world_bytes: &[u8] = include_bytes!("../../image/tilesets/world.png");
         let array_bytes = vec![world_bytes]; // テクスチャを増やす場合は要素を追加
 
         let mut textures = Vec::with_capacity(array_bytes.len());
         for bytes in array_bytes.iter() {
-            let texture = Texture::from_bytes(&device, &queue, bytes, "Texture 2D")?;
+            let texture = Texture::from_bytes(&device, &queue, bytes, config.format, "Texture 2D")?;
             textures.push(texture);
         }
 
@@ -426,19 +448,46 @@ impl State {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(false), // 書き込みは行わない
+                depth_compare: None,              // 参照もしない
+                stencil: wgpu::StencilState::default(), // ステンシルは使用しない
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
             cache: None,
         });
 
+        let device_params =
+            DeviceParams::new(monitor_size, max_texture_dimension_2d, target_logical_size);
+
+        let mut text_renderer = TextRenderer::new(
+            device.clone(),
+            queue.clone(),
+            device_params.target_logical_size,
+            // 画面サイズをカバーできるサイズ
+            device_params
+                .monitor_size()
+                .0
+                .max(device_params.monitor_size().1),
+            config.format,
+        );
+
+        let depth_texture = Texture::create_depth_texture(&device, size.width, size.height);
+        text_renderer.add_font(include_bytes!("../../fonts/yosugaraver1_2.ttf"));
+        text_renderer.add_font(include_bytes!("../../fonts/GenEiPOPlePw-Bk.ttf"));
+        //text_renderer.resize(size.width, size.height, device_params.target_logical_size);
+
         Ok(Self {
-            target_logical_size,
+            device_params,
             surface,
             device,
             queue,
             config,
             render_pipeline,
+            depth_texture,
             textures,
             sampler,
             texture_bind_group,
@@ -453,6 +502,7 @@ impl State {
             map_data_list,
             map_count: 0,
             tile_draw_groups,
+            text_renderer,
             input: InputState::default(),
             window,
         })
@@ -462,17 +512,141 @@ impl State {
         self.update_tile_data();
     }
 
+    /// 作成時にconfigと同じサイズで２回くるのでそのときはconfigureだけを行うようにしたい
+    /// resized発生時にsurfaceが破棄されているのでconfigureは必須
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
+            // 上限を超えていれば超えないように補正する
+            let (width, height) = if width > self.device_params.max_texture_dimension_2d()
+                || height > self.device_params.max_texture_dimension_2d()
+            {
+                // 縦横比を維持して補正
+                let w = width as f32;
+                let h = height as f32;
+                // 縦と横の大きい方を計算
+                let max_size = w.max(h);
+                // 縦横比を維持したサイズにする
+                let max_texture_dimension_2d = self.device_params.max_texture_dimension_2d() as f32;
+                (
+                    (w / max_size * max_texture_dimension_2d) as u32,
+                    (h / max_size * max_texture_dimension_2d) as u32,
+                )
+            } else {
+                (width, height)
+            };
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
+
+            self.depth_texture = Texture::create_depth_texture(&self.device, width, height);
+            self.text_renderer
+                .resize(width, height, self.device_params.target_logical_size);
+            self.text_renderer.clear();
+            self.draw_text();
+            self.text_renderer.submit(true);
         }
+    }
+
+    fn draw_text(&mut self) {
+        let paint = TextPaint {
+            font_index: 1,
+            font_size: 36,
+            font_weight: 500,
+            line_width: 4,
+            color: [255, 255, 255, 255],
+            line_color: [0, 0, 0, 128],
+        };
+        self.text_renderer
+            .draw_text(0.0, 0.0, 0.0, "hello world", &paint);
+
+        self.text_renderer
+            .draw_text(0.0, 40.0, 0.0, "はなす", &paint);
+
+        self.text_renderer
+            .draw_text(0.0, 80.0, 0.0, "じゅもん", &paint);
+    }
+
+    pub fn save_offscreen_png(&self, path: &std::path::Path) -> anyhow::Result<()> {
+        let width: u32 = self.text_renderer.texture_dimension();
+        let height: u32 = self.text_renderer.texture_dimension();
+        let row_bytes = width * 4; // RGBA8
+        let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded_bytes_per_row = row_bytes.div_ceil(alignment) * alignment;
+
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("offscreen readback buffer"),
+            size: u64::from(padded_bytes_per_row) * u64::from(height),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("offscreen readback encoder"),
+            });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.text_renderer.textures()[0].texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                tx.send(result).expect("map callback receiver dropped");
+            });
+        self.device.poll(wgpu::PollType::wait_indefinitely())?;
+        rx.recv()??;
+
+        let mapped = buffer.slice(..).get_mapped_range()?;
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for row in mapped
+            .chunks_exact(padded_bytes_per_row as usize)
+            .take(height as usize)
+        {
+            pixels.extend_from_slice(&row[..row_bytes as usize]);
+        }
+        drop(mapped);
+        buffer.unmap();
+
+        image::save_buffer(path, &pixels, width, height, image::ColorType::Rgba8)?;
+
+        Ok(())
     }
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, key: KeyCode, pressed: bool) {
         match (key, pressed) {
             (KeyCode::Escape, true) => event_loop.exit(),
+            (KeyCode::F2, true) => {
+                self.save_offscreen_png(&std::path::Path::new("femtovg_offscreen.png"))
+                    .unwrap();
+            }
+            (KeyCode::F11, true) => {
+                let fs = match self.window.fullscreen() {
+                    Some(_) => None,
+                    None => Some(winit::window::Fullscreen::Borderless(None)),
+                };
+                self.window.set_fullscreen(fs);
+            }
             _ => {
                 self.input.process_key(key, pressed);
             }
@@ -488,19 +662,20 @@ impl State {
             return;
         }
 
+        let target_logical_size = &self.device_params.target_logical_size;
         // 正射影行列を作成する、WGPUのNDCマッピング
         // 1draw中に変化することはないのでcpu側で行う
         let proj = glam::camera::rh::proj::directx::orthographic(
             0.0,
-            self.target_logical_size.0,
-            self.target_logical_size.1,
+            target_logical_size.0,
+            target_logical_size.1,
             0.0,
             -1.0,
             1.0,
         );
 
-        let half_logical_w = self.target_logical_size.0 / 2.0;
-        let half_logical_h = self.target_logical_size.1 / 2.0;
+        let half_logical_w = target_logical_size.0 / 2.0;
+        let half_logical_h = target_logical_size.1 / 2.0;
 
         let rotation = self.degress.to_radians();
         // 右側から適用
@@ -603,8 +778,9 @@ impl State {
         let counts: [u32; 3] = [self.textures[0].texture.width() / 32, 1, 1];
         tiles.clear();
 
-        let half_logical_w = self.target_logical_size.0 / 2.0;
-        let half_logical_h = self.target_logical_size.1 / 2.0;
+        let target_logical_size = &self.device_params.target_logical_size;
+        let half_logical_w = target_logical_size.0 / 2.0;
+        let half_logical_h = target_logical_size.1 / 2.0;
         // 可視範囲の計算
         // index = 1 は拡大縮小回転をしない
         let [half_w, half_h] = if index == 1 {
@@ -709,7 +885,14 @@ impl State {
                     },
                     depth_slice: None,
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 occlusion_query_set: None,
                 timestamp_writes: None,
                 multiview_mask: None,
@@ -738,6 +921,8 @@ impl State {
                 );
                 render_pass.draw(0..4, tile_draw_group.draw_range.clone());
             }
+
+            self.text_renderer.render(&mut render_pass);
         }
 
         self.queue.submit(iter::once(encoder.finish()));
@@ -760,7 +945,7 @@ impl App {
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window_attributes = Window::default_attributes()
-            .with_inner_size(winit::dpi::PhysicalSize::new(800, 600))
+            .with_inner_size(winit::dpi::PhysicalSize::new(960, 540))
             .with_visible(false);
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         window.set_visible(true);

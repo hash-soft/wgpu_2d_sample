@@ -541,7 +541,7 @@ impl State {
         // font1
         {
             let line_width = 4.0;
-            let stroke_paint = Paint::color(Color::rgba(0, 0, 0, 128))
+            let stroke_paint = Paint::color(Color::rgba(0, 255, 0, 128))
                 .with_font(&[self.font_ids[0]])
                 .with_font_weight(Paint::FONT_WEIGHT_REGULAR)
                 .with_line_width(line_width)
@@ -553,7 +553,7 @@ impl State {
                 // X座標の基準を「文字の左端」にする（デフォルトもLeft）
                 .with_text_align(femtovg::Align::Left);
 
-            let fill_paint = stroke_paint.clone().with_color(Color::white());
+            let fill_paint = stroke_paint.clone().with_color(Color::rgb(255, 0, 0));
 
             let text = "こんにちは, femtovg!\nand wgpu! こんにちは\nThis is a sample program.";
 
@@ -748,8 +748,13 @@ impl State {
 
     fn resize_text(&mut self) {
         // Canvasの解像度・スケールを更新
-        self.canvas
-            .set_size(self.config.width, self.config.height, 1.0);
+        // 実際に描画する先のサイズを指定する必要がある
+        // flush_to_outputで指定するテクスチャのサイズを指定する
+        self.canvas.set_size(
+            self.textures[0].texture.width(),
+            self.textures[0].texture.height(),
+            1.0,
+        );
 
         // 初期論理サイズに対するスケール倍率を計算
         let scale_x = self.config.width as f32 / self.target_logical_size.0;

@@ -39,28 +39,22 @@ impl Texture {
         })
     }
 
-    pub fn create_empty_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    pub fn create_empty_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Self {
+        let texture = Self::create_texture(device, 1, 1, format, false);
         let size = wgpu::Extent3d {
             width: 1,
             height: 1,
             depth_or_array_layers: 1,
         };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // 透明色 (0, 0, 0, 0) または黒などで初期化
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
-                texture: &texture,
+                texture: &texture.texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -74,6 +68,40 @@ impl Texture {
             size,
         );
 
+        texture
+    }
+
+    pub fn create_texture(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+        is_offscreen: bool,
+    ) -> Self {
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let usage = if is_offscreen {
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC
+        } else {
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: format,
+            usage,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
         Self { texture, view }
     }
 
@@ -81,19 +109,21 @@ impl Texture {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         bytes: &[u8],
+        format: wgpu::TextureFormat,
         label: &str,
     ) -> Result<Self> {
         let img = image::load_from_memory(bytes)?;
-        Self::from_image(device, queue, &img, Some(label))
+        Self::from_image(device, queue, &img, format, Some(label))
     }
 
     pub fn from_image(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         img: &image::DynamicImage,
+        format: wgpu::TextureFormat,
         label: Option<&str>,
     ) -> Result<Self> {
-        let rgba = img.to_rgba8();
+        let rgba = Self::convert_image_for_wgpu(img, format)?; // img.to_rgba8();
         let dimensions = img.dimensions();
 
         let size = wgpu::Extent3d {
@@ -101,7 +131,6 @@ impl Texture {
             height: dimensions.1,
             depth_or_array_layers: 1,
         };
-        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
             size,
@@ -132,6 +161,66 @@ impl Texture {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         Ok(Self { texture, view })
+    }
+
+    fn convert_image_for_wgpu(
+        img: &image::DynamicImage,
+        format: wgpu::TextureFormat,
+    ) -> Result<Vec<u8>> {
+        match format {
+            // RGBA 系
+            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
+                let rgba = img.to_rgba8();
+                Ok(rgba.into_raw())
+            }
+
+            // BGRA 系 (ウィンドウのサーフェ스等でよく使われる。RとBをスワップ)
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => {
+                let mut rgba = img.to_rgba8();
+                for pixel in rgba.chunks_exact_mut(4) {
+                    pixel.swap(0, 2); // Red と Blue を入れ替え
+                }
+                Ok(rgba.into_raw())
+            }
+
+            // グレースケール (R8)
+            wgpu::TextureFormat::R8Unorm => {
+                let gray = img.to_luma8();
+                Ok(gray.into_raw())
+            }
+
+            // グレースケール + アルファ (RG8)
+            wgpu::TextureFormat::Rg8Unorm => {
+                let gray_alpha = img.to_luma_alpha8();
+                Ok(gray_alpha.into_raw())
+            }
+
+            // 未対応のフォーマット
+            _ => Err(anyhow::anyhow!(
+                "convert_image_for_wgpu: Unsupported image format: {:?}",
+                format
+            )),
+        }
+    }
+
+    pub fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("UI Depth Texture"),
+            size: wgpu::Extent3d {
+                width: width.max(1),
+                height: height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+
+        Self { texture, view }
     }
 }
 
