@@ -146,7 +146,7 @@ impl State {
 
             let fill_paint = stroke_paint.clone().with_color(Color::white());
 
-            let text = "こんにちは, femtovg!\nand wgpu!\nThis is a sample program.";
+            let text = "こんにちは, femtovg!\n/and wgpu!／\nThis is a sample program.";
 
             let x = 5.0;
             let start_y = 5.0;
@@ -175,7 +175,7 @@ impl State {
 
             let fill_paint = stroke_paint.clone().with_color(Color::white());
 
-            let text = "こんにちは, femtovg!\nand wgpu!\nThis is a sample program.";
+            let text = "こんにちは, femtovg!\n/and wgpu!／\nThis is a sample program.";
 
             let x = 200.0;
             let start_y = 200.0;
@@ -186,6 +186,77 @@ impl State {
                 let _ = self.canvas.stroke_text(x, y, line, &stroke_paint);
                 let _ = self.canvas.fill_text(x, y, line, &fill_paint);
             }
+        }
+    }
+
+    fn draw_sharps(&mut self) {
+        // line
+        {
+            let mut line_path = femtovg::Path::new();
+            line_path.move_to(00.0, 50.0);
+            line_path.line_to(150.0, 50.0);
+            let mut line_paint = Paint::color(Color::rgb(255, 0, 0));
+            line_paint.set_line_width(4.0);
+            line_paint.set_line_cap(femtovg::LineCap::Round);
+            self.canvas.stroke_path(&line_path, &line_paint);
+        }
+        // line2 strokeで斜め線を描く
+        {
+            let mut path = femtovg::Path::new();
+            path.move_to(449.0, 10.0);
+            path.line_to(399.0, 60.0);
+            path.line_to(401.0, 60.0);
+            path.line_to(451.0, 10.0);
+            path.close(); // パスを閉じる
+
+            let fill_paint = Paint::color(Color::rgb(255, 200, 0));
+            let mut stroke_paint = Paint::color(Color::rgb(0, 0, 0));
+            stroke_paint.set_line_width(2.0);
+            stroke_paint.set_line_join(femtovg::LineJoin::Round);
+            self.canvas.stroke_path(&path, &stroke_paint);
+            self.canvas.fill_path(&path, &fill_paint);
+        }
+        // rect
+        {
+            let mut rect_path = femtovg::Path::new();
+            rect_path.rect(50.0, 340.0, 150.0, 80.0);
+            let fill_paint = Paint::color(Color::rgb(0, 128, 255));
+            let mut stroke_paint = Paint::color(Color::rgb(0, 0, 0));
+            stroke_paint.set_line_width(2.0);
+            // 枠線
+            self.canvas.stroke_path(&rect_path, &stroke_paint);
+            // 塗りつぶし
+            self.canvas.fill_path(&rect_path, &fill_paint);
+        }
+        // rect2 strokeで斜め線を描く
+        // サイズが計算しにくいのでいまいち
+        // line2 stroke はサイズと位置がわかりやすいのでそちらを使う
+        // 直線のstrokeもlineでよさそう
+        {
+            let canvas = &mut self.canvas;
+            canvas.save();
+            // 描画位置
+            canvas.translate(240.0, 340.0);
+            canvas.rotate(std::f32::consts::FRAC_PI_4); // 45度回転
+            // 描画するサイズ
+            // 位置は0,0相当の位置にする
+            let mut path = femtovg::Path::new();
+            path.rect(0.0, -10.0, 80.0, 20.0);
+            let fill_paint = Paint::color(Color::rgb(255, 200, 0));
+            let mut stroke_paint = Paint::color(Color::rgb(0, 0, 0));
+            stroke_paint.set_line_width(2.0);
+            canvas.stroke_path(&path, &stroke_paint); // 外枠の線
+            canvas.fill_path(&path, &fill_paint); // 中身の塗りつぶし
+            canvas.restore();
+        }
+
+        //  rounded rect 角が丸みを帯びている
+        {
+            let mut rounded_rect_path = femtovg::Path::new();
+            rounded_rect_path.rounded_rect(450.0, 340.0, 150.0, 80.0, 10.0);
+            let rounded_fill_paint = Paint::color(Color::rgb(50, 205, 50));
+            self.canvas
+                .fill_path(&rounded_rect_path, &rounded_fill_paint);
         }
     }
 
@@ -275,6 +346,7 @@ impl State {
         }
 
         self.draw_text();
+        self.draw_sharps();
 
         let clear_cmd = encoder.finish();
         let femtovg_cmd = self.canvas.flush_to_output(&output.texture);
