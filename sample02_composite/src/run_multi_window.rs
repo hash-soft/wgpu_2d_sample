@@ -18,6 +18,7 @@ use winit::{
 use crate::{
     load_map_static,
     sub::{
+        frame_renderer::FrameRenderer,
         key::InputState,
         map_data::MapData,
         text_renderer::{TextPaint, TextRenderer},
@@ -78,6 +79,7 @@ pub struct State {
     map_data_list: Vec<MapData>,
     map_count: u32,
     tile_draw_groups: Vec<TileDrawGroup>,
+    frame_renderer: FrameRenderer,
     text_renderer: TextRenderer,
     input: InputState,
     window: Arc<Window>,
@@ -475,9 +477,26 @@ impl State {
             config.format,
         );
 
-        let depth_texture = Texture::create_depth_texture(&device, size.width, size.height);
         text_renderer.add_font(include_bytes!("../../fonts/yosugaraver1_2.ttf"));
         text_renderer.add_font(include_bytes!("../../fonts/GenEiPOPlePw-Bk.ttf"));
+
+        //let frame_bytes: &[u8] = include_bytes!("../../image/window/Window_vl.png");
+        // まず実績のあるほうで試してみる
+        let frame_bytes: &[u8] = include_bytes!("../../image/window/WindowBase_blue.png");
+        let mut frame_renderer = FrameRenderer::new(
+            device.clone(),
+            queue.clone(),
+            device_params.target_logical_size,
+            // 画面サイズをカバーできるサイズ
+            frame_bytes,
+            config.format,
+            10,
+        )?;
+        frame_renderer.push_window(&(150.0, 100.0), &(500.0, 200.0), 0.5);
+
+        let depth_texture = Texture::create_depth_texture(&device, size.width, size.height);
+
+        // サイズガードを追加した場合は有効にしないと最初のサイズ設定がスキップされる
         //text_renderer.resize(size.width, size.height, device_params.target_logical_size);
 
         Ok(Self {
@@ -503,6 +522,7 @@ impl State {
             map_count: 0,
             tile_draw_groups,
             text_renderer,
+            frame_renderer,
             input: InputState::default(),
             window,
         })
@@ -922,6 +942,7 @@ impl State {
                 render_pass.draw(0..4, tile_draw_group.draw_range.clone());
             }
 
+            self.frame_renderer.render(&mut render_pass);
             self.text_renderer.render(&mut render_pass);
         }
 

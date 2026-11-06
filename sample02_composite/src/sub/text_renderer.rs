@@ -4,14 +4,48 @@ use wgpu::util::DeviceExt;
 
 use crate::sub::texture::Texture;
 
-/// どういう使い方をするか
-/// - 理想はdrawで指定した文字や位置をそのまま表示できること
-/// - 情報をキャッシュしてinstanceを作ればOkなのだが毎フレーム全drawを行う必要がある
-/// - 差分だけdrawをやり直したいがどういう風にすればいいか
-/// - まずは毎回draw方式で実装してみる
+/// # どういう使い方をするか
+/// - drawで指定した文字や位置をそのまま表示できる
+/// - 同じ情報を渡せば削除も可能
+/// - システム文字は固定で作成しておきインデックスでdrawできる
+/// - こちらは削除不可
+/// - draw_text、draw_indexのような感じ
+/// - 転送範囲を指定することもできる（文字の一部分だけ表示）
+/// - drawでパラメータ指定が必要
+/// - 最大と現在値を区切る斜め線や横線も必要
+/// - 必須ではないがルビもあればいい
+/// - 文章を小分けにしないと位置がわからないがそれをどうするか
+///
+/// # draw_text
+/// - テクスチャアトラスに描画＋インスタンスに追加
+/// - 位置情報は描画情報をキーにしたmapに保持する
+/// - mapにヒットした場合はインスタンスの追加だけを行う
+///
+/// # draw_index
+/// - 事前にテクスチャアトラスに描画しておく必要がある
+/// - 位置情報はvecで保持しておく
+/// - テクスチャアトラスの位置を取得＋インスタンスに追加
+///
+/// # instanceの使い方
+/// - 追加はpushすればいいだけなので問題なし
+/// - 問題は不要になったinstanceは削除か描画されない値にする必要があるがどう見つけるか
+/// - instanceは描画情報しかないので不要かどうかわからない
+/// - drawの時にinstanceのインデックスをOptionで返すようにするか（失敗ならNone）
+/// - instanceはvec形式でしか持てないので順次検索をする必要があるが毎回先頭からだと効率が悪い
+/// - 削除インデックスリストで管理するか
+///
+/// # テクスチャアトラス
+/// - システム文字、動的文字で分けない
+/// - 動的文字はシステム文字の後ろに追加する
+/// - アトラス管理システムが必要
+/// - これの削除とインスタンスは連動させない（使用側で管理）
+/// - 領域がなくなった場合はテクスチャを増やす
+/// - 同じサイズを増やすので2d配列のシェーダーが使用できると思ったが拡張できなくて全テクスチャ作り直しになるので実質できない
+///
+/// # まずは毎回draw方式で実装してみる ⇒ これはできた
 /// - なのでフレーム事にtextsをclearから始める
 /// - clear ⇒ 描画分draw ⇒ write_buffer
-/// - create_buffer_init から create_bufferにしてあらかじめメモリ確保しておかないといけない
+///
 
 pub struct TextPaint {
     pub font_index: u16,
@@ -256,16 +290,12 @@ impl Atlas {
 static MAX_TEXT: usize = 100;
 /// 後でクレート依存を分離する
 pub struct TextRenderer {
-    #[allow(dead_code)]
     device: wgpu::Device,
-    #[allow(dead_code)]
     queue: wgpu::Queue,
     render_pipeline: wgpu::RenderPipeline, // 転送用パイプライン
-    #[allow(dead_code)]
     texture_dimension: u32,
     canvas: Canvas<renderer::WGPURenderer>, // femtovg
     uniform_bind_group: wgpu::BindGroup,
-    #[allow(dead_code)]
     textures: Vec<Texture>,
     texture_bind_group: wgpu::BindGroup,
     #[allow(dead_code)]
@@ -607,6 +637,7 @@ impl TextRenderer {
     }
 
     /// オフスクリーンに描画したテキストを転送するだけものもの
+    /// todo シェーダーバッファは外から渡すようにする
     fn create_pipeline(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
@@ -614,7 +645,7 @@ impl TextRenderer {
         sampler_bind_group_layout: &wgpu::BindGroupLayout,
     ) -> wgpu::RenderPipeline {
         let shader_buffer = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Dyn Shader"),
+            label: Some("Text Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../shader_text.wgsl").into()),
         });
 

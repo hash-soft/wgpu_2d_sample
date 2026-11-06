@@ -1,3 +1,4 @@
+pub mod frame_renderer;
 pub mod key;
 pub mod map_data;
 pub mod sprite;

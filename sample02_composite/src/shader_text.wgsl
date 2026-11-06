@@ -54,7 +54,7 @@ fn vs_main(
     let ndc_x = (pixel_pos.x / global_uniforms.screen_size.x) * 2.0 - 1.0;
     let ndc_y = 1.0 - (pixel_pos.y / global_uniforms.screen_size.y) * 2.0;
 
-    out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
+    out.clip_position = vec4<f32>(ndc_x, ndc_y, instance.z, 1.0);
     out.texture_index = instance.texture_index;
     out.opacity = instance.opacity;
     out.color_multiply = instance.color_multiply;
