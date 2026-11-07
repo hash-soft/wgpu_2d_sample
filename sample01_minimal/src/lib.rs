@@ -13,6 +13,7 @@ pub mod run_texture_filter_noise;
 pub mod run_texture_introduction;
 pub mod run_texture_multi_2d_array;
 pub mod run_texture_multi_bind_group;
+pub mod run_texture_tiling;
 pub mod run_texture_uniform;
 pub mod run_viewport;
 pub mod run_viewport_stretch;

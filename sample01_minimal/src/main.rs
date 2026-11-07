@@ -3,8 +3,8 @@ use sample01_minimal::{
     run_font_glyphon_system, run_off_screen_render, run_polygon_simple, run_sprite_tilemap,
     run_texture_bindless, run_texture_filter_blur_screen, run_texture_filter_color,
     run_texture_filter_noise, run_texture_introduction, run_texture_multi_2d_array,
-    run_texture_multi_bind_group, run_texture_uniform, run_viewport, run_viewport_stretch,
-    run_window,
+    run_texture_multi_bind_group, run_texture_tiling, run_texture_uniform, run_viewport,
+    run_viewport_stretch, run_window,
 };
 
 fn main() -> anyhow::Result<()> {
@@ -25,6 +25,7 @@ fn main() -> anyhow::Result<()> {
                     "texture_multi_bind_group" => 12, // BindGropuを複数登録し複数のテクスチャを表示
                     "texture_multi_2d_array" => 13,   // 1回描画で複数のテクスチャを表示
                     "texture_bindless" => 14,         // サイズの異なるテクスチャ配列
+                    "texture_tiling" => 15,           // テクスチャをインスタンス1つで繰り返し表示
                     "viewport" => 20,                 // ビューポート
                     // ビューポートを設定して引き延ばし転送
                     // 作ってはみたもののぼやけて使い物にならない、が最大テクスチャサイズを超えた解像度の画面に表示する場合はこれをやるしかない
@@ -56,6 +57,7 @@ fn main() -> anyhow::Result<()> {
         12 => run_texture_multi_bind_group::run(),
         13 => run_texture_multi_2d_array::run(),
         14 => run_texture_bindless::run(),
+        15 => run_texture_tiling::run(),
         20 => run_viewport::run(),
         21 => run_viewport_stretch::run(),
         30 => run_off_screen_render::run(),
@@ -69,6 +71,6 @@ fn main() -> anyhow::Result<()> {
         61 => run_texture_filter_color::run(),
         62 => run_texture_filter_blur_screen::run(),
         70 => run_sprite_tilemap::run(),
-        _ => run_font_femtovg_off_screen::run(),
+        _ => run_texture_tiling::run(),
     }
 }
