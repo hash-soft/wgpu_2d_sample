@@ -18,6 +18,8 @@ use winit::{
 use crate::{
     load_map_static,
     sub::{
+        self,
+        data::{Ram, Rom, Scene},
         frame_renderer::FrameRenderer,
         key::InputState,
         map_data::MapData,
@@ -81,7 +83,10 @@ pub struct State {
     tile_draw_groups: Vec<TileDrawGroup>,
     frame_renderer: FrameRenderer,
     text_renderer: TextRenderer,
+    game_window: sub::window::WindowManager,
     input: InputState,
+    rom: Rom,
+    ram: Ram,
     window: Arc<Window>,
 }
 
@@ -466,8 +471,8 @@ impl State {
             DeviceParams::new(monitor_size, max_texture_dimension_2d, target_logical_size);
 
         let mut text_renderer = TextRenderer::new(
-            device.clone(),
-            queue.clone(),
+            &device,
+            &queue,
             device_params.target_logical_size,
             // 画面サイズをカバーできるサイズ
             device_params
@@ -477,23 +482,24 @@ impl State {
             config.format,
         );
 
-        text_renderer.add_font(include_bytes!("../../fonts/yosugaraver1_2.ttf"));
+        text_renderer.add_font(include_bytes!("../../fonts/mplus-2m-regular.ttf"));
         text_renderer.add_font(include_bytes!("../../fonts/GenEiPOPlePw-Bk.ttf"));
+        text_renderer.add_font(include_bytes!("../../fonts/yosugaraver1_2.ttf"));
 
         //let frame_bytes: &[u8] = include_bytes!("../../image/window/Window_vl.png");
         // まず実績のあるほうで試してみる
         let frame_bytes: &[u8] = include_bytes!("../../image/window/WindowBase_blue.png");
-        let mut frame_renderer = FrameRenderer::new(
-            device.clone(),
-            queue.clone(),
+        let frame_renderer = FrameRenderer::new(
+            &device,
+            &queue,
             device_params.target_logical_size,
             // 画面サイズをカバーできるサイズ
             frame_bytes,
             config.format,
-            10,
+            50,
         )?;
-        frame_renderer.push_window(&(150.0, 100.0), &(500.0, 200.0), 0.5);
 
+        let game_window = sub::window::WindowManager::new();
         let depth_texture = Texture::create_depth_texture(&device, size.width, size.height);
 
         // サイズガードを追加した場合は有効にしないと最初のサイズ設定がスキップされる
@@ -523,7 +529,10 @@ impl State {
             tile_draw_groups,
             text_renderer,
             frame_renderer,
+            game_window,
             input: InputState::default(),
+            rom: Rom::new(),
+            ram: Ram::new(),
             window,
         })
     }
@@ -535,6 +544,8 @@ impl State {
     /// 作成時にconfigと同じサイズで２回くるのでそのときはconfigureだけを行うようにしたい
     /// resized発生時にsurfaceが破棄されているのでconfigureは必須
     pub fn resize(&mut self, width: u32, height: u32) {
+        println!("resize {}x{}", width, height);
+        // 最小化のときは0になる
         if width > 0 && height > 0 {
             // 上限を超えていれば超えないように補正する
             let (width, height) = if width > self.device_params.max_texture_dimension_2d()
@@ -559,31 +570,23 @@ impl State {
             self.surface.configure(&self.device, &self.config);
 
             self.depth_texture = Texture::create_depth_texture(&self.device, width, height);
-            self.text_renderer
-                .resize(width, height, self.device_params.target_logical_size);
-            self.text_renderer.clear();
+            self.game_window.resize_screen(
+                &mut self.text_renderer,
+                width,
+                height,
+                self.device_params.target_logical_size,
+            );
+            self.game_window.clear(&mut self.text_renderer);
             self.draw_text();
             self.text_renderer.submit(true);
         }
     }
 
     fn draw_text(&mut self) {
-        let paint = TextPaint {
-            font_index: 1,
-            font_size: 36,
-            font_weight: 500,
-            line_width: 4,
-            color: [255, 255, 255, 255],
-            line_color: [0, 0, 0, 128],
-        };
-        self.text_renderer
-            .draw_text(0.0, 0.0, 0.0, "hello world", &paint);
-
-        self.text_renderer
-            .draw_text(0.0, 40.0, 0.0, "はなす", &paint);
-
-        self.text_renderer
-            .draw_text(0.0, 80.0, 0.0, "じゅもん", &paint);
+        for i in 0..self.game_window.window_len() {
+            let menu_index = self.game_window.item_id(i).unwrap();
+            self.draw_text_normal(i, menu_index);
+        }
     }
 
     pub fn save_offscreen_png(&self, path: &std::path::Path) -> anyhow::Result<()> {
@@ -674,14 +677,80 @@ impl State {
     }
 
     fn update(&mut self) {
-        if self.update_input() {
-            self.update_tile_data();
+        self.update_input();
+
+        if self.tile_draw_groups.len() != 0 {
+            self.update_map();
         }
 
-        if self.tile_draw_groups.len() == 0 {
-            return;
+        if self.ram.scene() == Scene::Menu {
+            self.update_menu();
+        }
+        self.ram.apply_next_scene();
+    }
+
+    fn update_input(&mut self) {
+        match self.ram.scene() {
+            Scene::Map => {
+                if self.update_input_map() {
+                    self.update_tile_data();
+                }
+            }
+            Scene::Menu => self.update_input_menu(),
+        }
+    }
+
+    fn update_input_map(&mut self) -> bool {
+        if self.input.menu {
+            self.ram.next_scene = Some(Scene::Menu);
+            self.ram.start_menu_index = Some(0);
+            self.input.menu = false;
+            return false;
+        }
+        if self.input.reset {
+            // マップの左上の中心に表示が[0.0, 0.0]となる
+            self.camera_pos = WORLD_INITIAL_POS;
+            self.scale = 1.0;
+            self.degress = 0.0;
+            return true;
         }
 
+        let speed = 8.0;
+        let [dx, dy] = self.input.direction();
+
+        let mut dirty = false;
+
+        if dx != 0.0 || dy != 0.0 {
+            self.camera_pos[0] += dx * speed;
+            self.camera_pos[1] += dy * speed;
+            dirty = true;
+        }
+
+        // 値がずれないように２の負のべき乗単位で拡大縮小する
+        if self.input.plus {
+            self.scale += 0.0625;
+            dirty = true;
+        } else if self.input.minus {
+            if self.scale > 0.125 {
+                self.scale -= 0.0625;
+                self.scale = self.scale.max(0.125);
+                dirty = true;
+            }
+        }
+        let prev_degress = self.degress;
+        if self.input.rotation_l {
+            self.degress = (self.degress + 360.0 - 4.0) % 360.0;
+        } else if self.input.rotation_r {
+            self.degress = (self.degress + 4.0) % 360.0;
+        }
+        if prev_degress != self.degress && (prev_degress == 0.0 || self.degress == 0.0) {
+            dirty = true;
+        }
+
+        return dirty;
+    }
+
+    fn update_map(&mut self) {
         let target_logical_size = &self.device_params.target_logical_size;
         // 正射影行列を作成する、WGPUのNDCマッピング
         // 1draw中に変化することはないのでcpu側で行う
@@ -731,50 +800,6 @@ impl State {
                 );
             }
         }
-    }
-
-    fn update_input(&mut self) -> bool {
-        if self.input.reset {
-            // マップの左上の中心に表示が[0.0, 0.0]となる
-            self.camera_pos = WORLD_INITIAL_POS;
-            self.scale = 1.0;
-            self.degress = 0.0;
-            return true;
-        }
-
-        let speed = 8.0;
-        let [dx, dy] = self.input.direction();
-
-        let mut dirty = false;
-
-        if dx != 0.0 || dy != 0.0 {
-            self.camera_pos[0] += dx * speed;
-            self.camera_pos[1] += dy * speed;
-            dirty = true;
-        }
-
-        // 値がずれないように２の負のべき乗単位で拡大縮小する
-        if self.input.plus {
-            self.scale += 0.0625;
-            dirty = true;
-        } else if self.input.minus {
-            if self.scale > 0.125 {
-                self.scale -= 0.0625;
-                self.scale = self.scale.max(0.125);
-                dirty = true;
-            }
-        }
-        let prev_degress = self.degress;
-        if self.input.rotation_l {
-            self.degress = (self.degress + 360.0 - 4.0) % 360.0;
-        } else if self.input.rotation_r {
-            self.degress = (self.degress + 4.0) % 360.0;
-        }
-        if prev_degress != self.degress && (prev_degress == 0.0 || self.degress == 0.0) {
-            dirty = true;
-        }
-
-        return dirty;
     }
 
     fn update_tile_data(&mut self) {
@@ -859,6 +884,112 @@ impl State {
         );
     }
 
+    fn update_input_menu(&mut self) {
+        if self.ram.start_menu_index.is_some() {
+            // メニューを表示していない間は受け付けない
+            return;
+        }
+        if self.input.menu {
+            // メニューを増やす
+            // next : テクスチャ切り替えはいったん置いておいて次メニューを表示する
+            // 元のメニューは暗くなるようにする
+            match self.ram.current_menu_index {
+                0 => self.ram.start_menu_index = Some(1),
+                1 => {} // todo 上限時はメッセージを表示する
+                _ => {}
+            }
+        } else if self.input.cancel {
+            // メニューを減らす
+            self.game_window
+                .pop_window(&mut self.frame_renderer, &mut self.text_renderer);
+            self.remove_text_cache(self.ram.current_menu_index);
+            self.text_renderer.submit(false);
+            // 0になったらマップに戻る
+            if self.game_window.window_len() == 0 {
+                self.ram.next_scene = Some(Scene::Map);
+            }
+        }
+        // すぐ離した扱いにする
+        self.input.menu = false;
+        self.input.cancel = false;
+    }
+
+    fn update_menu(&mut self) {
+        let start_menu_index = if let Some(index) = self.ram.start_menu_index {
+            index
+        } else {
+            // カーソルの点滅などを行う
+            return;
+        };
+
+        let window = &self.rom.windows[start_menu_index as usize];
+        // フレーム
+        let index = self
+            .game_window
+            .create_window(start_menu_index, window.position, window.size)
+            .unwrap();
+        self.game_window
+            .build_frame(&mut self.frame_renderer, index);
+
+        // todo 1枚ずつしか描画できないので自動で作成することはせずインデックスを指定する
+        // 領域がなくなったら外で追加して別インデックスを指定することにする
+        // 順序としては次
+        // 1.最初のインデックスで試す
+        // 2.領域がなければ次のインデックス
+        // 3.既存のインデックスになければ新規作成
+        // 注) 次のインデックスにまたがる際にコマンドを回収して描画する
+        self.draw_text_normal(index, start_menu_index);
+        // todo 描画するテクスチャごとにsubmitを発行しないといけない
+        // なのでdraw_text_normalのなかに埋め込まれる感じ
+        self.text_renderer.submit(false);
+
+        self.ram.start_menu_index = None;
+    }
+
+    fn draw_text_normal(&mut self, index: u32, menu_index: u32) {
+        let window = &self.rom.windows[menu_index as usize];
+        // テキスト
+        let paint = TextPaint {
+            font_index: 0,
+            font_size: window.font_size,
+            font_weight: 400,
+            line_width: 4,
+            color: [255, 255, 255, 255],
+            line_color: [0, 0, 0, 128],
+        };
+        self.game_window.begin_build_text(&self.text_renderer);
+        let height = window.height as f32;
+        for i in 0..window.texts.len() {
+            let y = i as f32 * height;
+            self.game_window.build_text(
+                &mut self.text_renderer,
+                index,
+                0.0,
+                y,
+                &window.texts[i],
+                &paint,
+            );
+        }
+        self.game_window.end_build_text(&self.text_renderer);
+    }
+
+    fn remove_text_cache(&mut self, menu_index: u32) {
+        let window = &self.rom.windows[menu_index as usize];
+        // テキスト
+        let paint = TextPaint {
+            font_index: 0,
+            font_size: window.font_size,
+            font_weight: 500,
+            line_width: 4,
+            color: [255, 255, 255, 255],
+            line_color: [0, 0, 0, 128],
+        };
+
+        for i in 0..window.texts.len() {
+            self.text_renderer.remove_cache(&window.texts[i], &paint);
+        }
+    }
+
     fn render(&mut self) -> anyhow::Result<()> {
         self.window.request_redraw();
 
@@ -908,7 +1039,7 @@ impl State {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth_texture.view,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
+                        load: wgpu::LoadOp::Clear(0.0),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -943,7 +1074,8 @@ impl State {
             }
 
             self.frame_renderer.render(&mut render_pass);
-            self.text_renderer.render(&mut render_pass);
+            self.text_renderer
+                .render(&mut render_pass, Some(self.game_window.item_ranges()));
         }
 
         self.queue.submit(iter::once(encoder.finish()));

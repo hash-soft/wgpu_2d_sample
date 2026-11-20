@@ -1,8 +1,13 @@
+use std::ops;
+
 use ahash::AHashMap;
 use femtovg::{Canvas, Color, FontId, Paint, renderer};
 use wgpu::util::DeviceExt;
 
-use crate::sub::texture::Texture;
+use crate::sub::{
+    shelf_texture_atlas::{AtlasHandle, ShelfAtlas},
+    texture::Texture,
+};
 
 /// # どういう使い方をするか
 /// - drawで指定した文字や位置をそのまま表示できる
@@ -46,7 +51,19 @@ use crate::sub::texture::Texture;
 /// - なのでフレーム事にtextsをclearから始める
 /// - clear ⇒ 描画分draw ⇒ write_buffer
 ///
+/// # todo textだけじゃなくてウィンドウに限らない項目を構成するものだからwindow_itemに名前を変える
+///
+/// # todo 色を塗る機能も追加
+/// - color系はインデックスで持ち texture_index でテクスチャか色塗りかを分ける
+/// - テクスチャは mat4とoffset、色塗りはvec4 のインデックスから値を引く
+///
+/// # todo 薄い色をベースに濃い色を上昇させる機能も追加
+/// - colorと同様 texture_index で分ける
+/// - テクスチャと色塗に比べて情報量が多いのでどうするか
+/// - インデックスで持つにしてもオフセットは別で必要だから最低1つは変数の追加が必要
+///
 
+#[derive(Debug)]
 pub struct TextPaint {
     pub font_index: u16,
     pub font_size: u16,
@@ -68,7 +85,9 @@ struct CacheKey {
     pub line_color: [u8; 4],
 }
 
+#[derive(Debug)]
 struct Glyph {
+    atlas_handle: AtlasHandle,
     pub texture_index: u32,
     pub uv_offset: [f32; 2],
     pub uv_size: [f32; 2],
@@ -159,24 +178,19 @@ impl TextInstance {
     }
 }
 
+#[derive(Debug)]
 struct Atlas {
-    last_x: f32,
-    last_y: f32,
-    last_width: f32,
-    last_height: f32,
-    last_texture_index: u32,
     scale: (f32, f32),
+    atlas_index: usize,
+    shelf_atlases: Vec<ShelfAtlas>,
 }
 
 impl Default for Atlas {
     fn default() -> Self {
         Self {
-            last_x: 0.0,
-            last_y: 0.0,
-            last_width: 0.0,
-            last_height: 0.0,
-            last_texture_index: 0,
             scale: (1.0, 1.0),
+            atlas_index: 0,
+            shelf_atlases: Vec::new(),
         }
     }
 }
@@ -186,12 +200,16 @@ impl Atlas {
         self.scale = (scale_x, scale_y);
     }
 
-    pub fn reset(&mut self) {
-        self.last_x = 0.0;
-        self.last_y = 0.0;
-        self.last_width = 0.0;
-        self.last_height = 0.0;
-        self.last_texture_index = 0;
+    pub fn reset(&mut self, texture_dimension: u32) {
+        let texture_dimension = texture_dimension as f32;
+        let logical_texture_width = (texture_dimension / self.scale.0).floor();
+        let logical_texture_height = (texture_dimension / self.scale.1).floor();
+        self.shelf_atlases.clear();
+        self.shelf_atlases.push(ShelfAtlas::new(
+            0,
+            logical_texture_width as u16,
+            logical_texture_height as u16,
+        ));
     }
 
     pub fn draw_canvas(
@@ -201,7 +219,11 @@ impl Atlas {
         font_id: FontId,
         text: &str,
         paint: &TextPaint,
-    ) -> Glyph {
+    ) -> Option<Glyph> {
+        // 描画対象のアトラスが用意されていない場合は終了
+        if self.atlas_index >= self.shelf_atlases.len() {
+            return None;
+        }
         let line_width = paint.line_width as f32;
         let fill_paint = Paint::color(Color::rgba(
             paint.color[0],
@@ -210,37 +232,40 @@ impl Atlas {
             paint.color[3],
         ))
         .with_font(&[font_id])
-        .with_font_weight(Paint::FONT_WEIGHT_REGULAR)
+        .with_font_weight(paint.font_weight as f32)
         .with_font_size(paint.font_size as f32)
         .with_line_join(femtovg::LineJoin::Round) // トゲ飛び出し防止
         .with_text_baseline(femtovg::Baseline::Top)
         .with_text_align(femtovg::Align::Left);
+        // todo: top -> 文字によって縦幅が違うから調整が必要かもしれない
+        // left -> 転送位置で調整すればいいからLeftだけでいいが左の位置は切り上げ前のものを使う必要がある
+        // それぞれglyphに持たせておくか
 
         let pad = line_width / 2.0;
         let texture_dimension = texture_dimension as f32;
-        let logical_texture_width = (texture_dimension / self.scale.0).floor();
         // 描画位置の更新
-        if let Ok(metrics) = canvas.measure_text(0.0, 0.0, text, &fill_paint) {
+        let handle = if let Ok(metrics) = canvas.measure_text(0.0, 0.0, text, &fill_paint) {
             // 小数点以下を切り上げて整数にする
             let (width, height) = (
                 metrics.width().ceil() + line_width,
                 metrics.height().ceil() + line_width,
             );
-            let (tex_x, tex_y) = if height > self.last_height {
-                // 高さが足りなければ次の行へ
-                (0.0, self.last_y + self.last_height)
-            } else if self.last_x + self.last_width + width > logical_texture_width {
-                // 横幅が足りなければ次の行へ
-                (0.0, self.last_y + self.last_height)
+
+            if let Some(handle) =
+                self.shelf_atlases[self.atlas_index].allocate(width as u16, height as u16)
+            {
+                handle
             } else {
-                (self.last_x + self.last_width, self.last_y)
-            };
-            // todo 高さが足りていなければテクスチャの追加処理も必要
-            self.last_x = tex_x;
-            self.last_y = tex_y;
-            self.last_width = width;
-            self.last_height = height;
-        }
+                return None;
+            }
+        } else {
+            return None;
+        };
+
+        let new_x = handle.x() as f32;
+        let new_y = handle.y() as f32;
+        let new_width = handle.width() as f32;
+        let new_height = handle.height() as f32;
 
         // {
         //     // 背景を塗りつぶしたいとき
@@ -249,8 +274,8 @@ impl Atlas {
         //     let back_paint = Paint::color(Color::rgb(0, 255, 0)); // 背景色
         //     canvas.fill_path(&path, &back_paint);
         // }
-        let x = self.last_x + pad;
-        let y = self.last_y + pad;
+        let x = new_x + pad;
+        let y = new_y + pad;
         // ストロークがあれば先に描画する
         if line_width > 0.0 {
             let stroke_paint = fill_paint
@@ -267,10 +292,10 @@ impl Atlas {
         }
         let _ = canvas.fill_text(x, y, text, &fill_paint);
 
-        let tex_actual_x = self.last_x * self.scale.0;
-        let tex_actual_y = self.last_y * self.scale.1;
-        let tex_actual_w = self.last_width * self.scale.0;
-        let tex_actual_h = self.last_height * self.scale.1;
+        let tex_actual_x = new_x * self.scale.0;
+        let tex_actual_y = new_y * self.scale.1;
+        let tex_actual_w = new_width * self.scale.0;
+        let tex_actual_h = new_height * self.scale.1;
         let uv_offset = [
             tex_actual_x / texture_dimension,
             tex_actual_y / texture_dimension,
@@ -279,16 +304,28 @@ impl Atlas {
             tex_actual_w / texture_dimension,
             tex_actual_h / texture_dimension,
         ];
-        Glyph {
-            texture_index: self.last_texture_index,
+        Some(Glyph {
+            atlas_handle: handle,
+            texture_index: 0, // 参照atlas_shelfのインデックスになる
             uv_offset,
             uv_size,
-        }
+        })
+    }
+
+    pub fn clear_canvas(&mut self, canvas: &mut Canvas<renderer::WGPURenderer>, glyph: &Glyph) {
+        let x = glyph.atlas_handle.x() as u32;
+        let y = glyph.atlas_handle.y() as u32;
+        let width = glyph.atlas_handle.width() as u32;
+        let height = glyph.atlas_handle.height() as u32;
+        let index = glyph.texture_index as usize;
+        self.shelf_atlases[index].free(&glyph.atlas_handle);
+        canvas.clear_rect(x, y, width, height, Color::rgba(0, 0, 0, 0));
     }
 }
 
 static MAX_TEXT: usize = 100;
 /// 後でクレート依存を分離する
+#[derive(Debug)]
 pub struct TextRenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -311,8 +348,8 @@ pub struct TextRenderer {
 
 impl TextRenderer {
     pub fn new(
-        device: wgpu::Device,
-        queue: wgpu::Queue,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
         logical_size: (f32, f32),
         texture_dimension: u32,
         format: wgpu::TextureFormat,
@@ -364,8 +401,8 @@ impl TextRenderer {
         });
 
         Self {
-            device,
-            queue,
+            device: device.clone(),
+            queue: queue.clone(),
             render_pipeline,
             texture_dimension,
             canvas,
@@ -383,12 +420,42 @@ impl TextRenderer {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn print_text_size(&self, text: &str, paint: &TextPaint) {
+        let fill_paint = Paint::color(Color::rgba(
+            paint.color[0],
+            paint.color[1],
+            paint.color[2],
+            paint.color[3],
+        ))
+        .with_font(&[self.font_ids[paint.font_index as usize]])
+        .with_font_weight(paint.font_weight as f32)
+        .with_font_size(paint.font_size as f32)
+        .with_line_join(femtovg::LineJoin::Round) // トゲ飛び出し防止
+        .with_text_baseline(femtovg::Baseline::Top)
+        .with_text_align(femtovg::Align::Left);
+        if let Ok(metrics) = self.canvas.measure_text(0.0, 0.0, text, &fill_paint) {
+            println!(
+                "font_size:{} width:{} height:{}",
+                paint.font_size,
+                metrics.width(),
+                metrics.height()
+            );
+        } else {
+            println!("print_text_size {} error", text);
+        }
+    }
+
     pub fn texture_dimension(&self) -> u32 {
         self.texture_dimension
     }
 
     pub fn textures(&self) -> &Vec<Texture> {
         &self.textures
+    }
+
+    pub fn texts_len(&self) -> usize {
+        self.texts.len()
     }
 
     /// フォントを追加
@@ -401,17 +468,32 @@ impl TextRenderer {
         self.font_ids.push(font_id);
     }
 
-    pub fn render(&mut self, render_pass: &mut wgpu::RenderPass<'_>) {
-        if self.texts.is_empty() {
+    pub fn render(
+        &self,
+        render_pass: &mut wgpu::RenderPass<'_>,
+        ranges: Option<&Vec<ops::Range<u32>>>,
+    ) {
+        let range = if let Some(ranges) = ranges {
+            if let Some(last) = ranges.last() {
+                ranges[0].start..last.end
+            } else {
+                return;
+            }
+        } else {
+            0..self.texts.len() as u32
+        };
+        // rangeで確認すればtextsの空を確認する必要はない
+        if range.is_empty() {
             return;
         }
+
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
         render_pass.set_bind_group(1, &self.texture_bind_group, &[]);
         render_pass.set_bind_group(2, &self.sampler_bind_group, &[]);
 
         render_pass.set_vertex_buffer(0, self.text_instance_buffer.slice(..));
-        render_pass.draw(0..4, 0..self.texts.len() as u32);
+        render_pass.draw(0..4, range);
     }
 
     pub fn resize(&mut self, width: u32, height: u32, logical_size: (f32, f32)) {
@@ -427,12 +509,13 @@ impl TextRenderer {
             .set_size(self.texture_dimension, self.texture_dimension, 1.0);
 
         self.atlas.set_scale(scale_x, scale_y);
+        self.atlas.reset(self.texture_dimension);
     }
 
     pub fn clear(&mut self) {
         self.texts.clear();
         self.cache.clear();
-        self.atlas.reset();
+        self.atlas.reset(self.texture_dimension);
     }
 
     pub fn draw_text(&mut self, x: f32, y: f32, z: f32, text: &str, paint: &TextPaint) {
@@ -450,22 +533,33 @@ impl TextRenderer {
             line_color: paint.line_color,
         };
 
-        let glyph = self.cache.entry(key).or_insert_with(|| {
-            // ヒットしなかった場合、drawを行う
-            self.atlas.draw_canvas(
-                &mut self.canvas,
-                self.texture_dimension,
-                self.font_ids[paint.font_index as usize],
-                text,
-                paint,
-            )
-        });
+        let glyph = match self.cache.entry(key) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                // ヒットしなかった場合、drawを行う
+                let glyph = self.atlas.draw_canvas(
+                    &mut self.canvas,
+                    self.texture_dimension,
+                    self.font_ids[paint.font_index as usize],
+                    text,
+                    paint,
+                );
+                if let Some(glyph) = glyph {
+                    entry.insert(glyph)
+                } else {
+                    return;
+                }
+            }
+        };
 
+        let width = glyph.atlas_handle.width() as f32;
+        let height = glyph.atlas_handle.height() as f32;
+        // last_width, last_heightの部分
         let pad = paint.line_width as f32 / 2.0;
         // instanceを追加する
         let instance = TextInstance {
             position: [x - pad, y - pad],
-            size: [self.atlas.last_width, self.atlas.last_height],
+            size: [width, height],
             uv_offset: glyph.uv_offset,
             uv_size: glyph.uv_size,
             texture_index: glyph.texture_index,
@@ -475,6 +569,21 @@ impl TextRenderer {
             color_add: [0.0, 0.0, 0.0, 0.0],
         };
         self.texts.push(instance);
+    }
+
+    pub fn remove_cache(&mut self, text: &str, paint: &TextPaint) {
+        let key = CacheKey {
+            text: text.to_string(),
+            font_index: paint.font_index,
+            font_size: paint.font_size,
+            font_weight: paint.font_weight,
+            line_width: paint.line_width,
+            color: paint.color,
+            line_color: paint.line_color,
+        };
+        if let Some(glyph) = self.cache.remove(&key) {
+            self.atlas.clear_canvas(&mut self.canvas, &glyph);
+        }
     }
 
     /// canvasにため込んだコマンドをGPUに送る
@@ -511,6 +620,8 @@ impl TextRenderer {
         self.queue
             .submit(std::iter::once(encoder.finish()).chain(cmd));
 
+        // todo: offsetの位置も指定できるようにする
+        // キャッシュ削除の場合は不要、というかこれ別で分けたほうがいい
         // instance更新
         self.queue.write_buffer(
             &self.text_instance_buffer,
@@ -698,7 +809,7 @@ impl TextRenderer {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
@@ -706,8 +817,8 @@ impl TextRenderer {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: Some(false), // 書き込みは行わない
-                depth_compare: Some(wgpu::CompareFunction::Less), // 手前（小さい値）にあるピクセルを描画
-                stencil: wgpu::StencilState::default(),           // ステンシルは使用しない
+                depth_compare: Some(wgpu::CompareFunction::Greater), // 手前（大きい値）にあるピクセルを描画
+                stencil: wgpu::StencilState::default(),              // ステンシルは使用しない
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {

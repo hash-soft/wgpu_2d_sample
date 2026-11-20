@@ -11,6 +11,8 @@ pub struct InputState {
     pub reset: bool,
     pub rotation_l: bool,
     pub rotation_r: bool,
+    pub menu: bool,
+    pub cancel: bool,
 }
 
 impl InputState {
@@ -50,6 +52,14 @@ impl InputState {
             }
             KeyCode::KeyR => {
                 self.rotation_r = is_pressed;
+                true
+            }
+            KeyCode::KeyM => {
+                self.menu = is_pressed;
+                true
+            }
+            KeyCode::KeyC => {
+                self.cancel = is_pressed;
                 true
             }
             _ => false,

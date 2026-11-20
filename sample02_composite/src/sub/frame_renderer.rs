@@ -1,3 +1,5 @@
+use std::ops;
+
 use wgpu::util::DeviceExt;
 
 use crate::sub::texture::Texture;
@@ -22,6 +24,11 @@ use crate::sub::texture::Texture;
 /// # カーソル
 /// - 基本なしか1つだが複数カーソルにも対応しておきたい
 /// - そうするとその分のインスタンスが増えることになる
+/// - こっちにカーソルだとウィンドウからはみ出すタイプが不可になる
+/// - ウィンドウ内はウィンドウの少し上、はみ出す部分は最低のZ値ならいけるか
+///
+/// # フレームと背景以外はcontentsで描画するので10インスタンス固定でOK
+/// - 10インスタンス使わないフレームの場合もインスタンスは減らさず、使わないインスタンスは範囲外のパラメータにしておく
 ///
 
 /// こっちは背景のタイリングを持つのでtextと統一できない
@@ -110,6 +117,7 @@ struct FrameUniforms {
     logical_size: [f32; 2],
 }
 
+#[derive(Debug)]
 pub struct FrameRenderer {
     #[allow(dead_code)]
     device: wgpu::Device,
@@ -125,13 +133,13 @@ pub struct FrameRenderer {
     sampler_bind_group: wgpu::BindGroup,
     frames: Vec<FrameInstance>,
     frame_instance_buffer: wgpu::Buffer,
-    start_points: Vec<u32>,
+    ranges: Vec<ops::Range<u32>>,
 }
 
 impl FrameRenderer {
     pub fn new(
-        device: wgpu::Device,
-        queue: wgpu::Queue,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
         logical_size: (f32, f32),
         frame_bytes: &[u8],
         format: wgpu::TextureFormat,
@@ -176,11 +184,11 @@ impl FrameRenderer {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false, // 作成時には書き込まない
         });
-        let start_points: Vec<u32> = Vec::with_capacity(initial_window_count);
+        let ranges: Vec<ops::Range<u32>> = Vec::with_capacity(initial_window_count);
 
         Ok(Self {
-            device: device,
-            queue: queue,
+            device: device.clone(),
+            queue: queue.clone(),
             render_pipeline,
             uniform_bind_group,
             texture,
@@ -189,16 +197,16 @@ impl FrameRenderer {
             sampler_bind_group,
             frames,
             frame_instance_buffer,
-            start_points,
+            ranges,
         })
     }
 
-    pub fn render(&mut self, render_pass: &mut wgpu::RenderPass<'_>) {
+    pub fn render(&self, render_pass: &mut wgpu::RenderPass<'_>) {
         if self.frames.is_empty() {
             return;
         }
-        let start_index = if let Some(last) = self.start_points.last() {
-            *last
+        let range = if let Some(last) = self.ranges.last() {
+            last
         } else {
             return;
         };
@@ -208,10 +216,10 @@ impl FrameRenderer {
         render_pass.set_bind_group(2, &self.sampler_bind_group, &[]);
 
         // ここがやっかい
-        // 後ろから追加していくので start = end - 描画frame数, end = self.frames.len() となる
+        // 後ろから追加していくので 最終rangeの start ～ self.frames.len() となる
         // vertexは全部セットしてdrawで範囲を調整のほうがわかりやすそうなのでそうする
         render_pass.set_vertex_buffer(0, self.frame_instance_buffer.slice(..));
-        render_pass.draw(0..4, start_index..self.frames.len() as u32);
+        render_pass.draw(0..4, range.start..self.frames.len() as u32);
     }
 
     fn create_uniform_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -232,12 +240,12 @@ impl FrameRenderer {
 
     /// テクスチャがフレームより大きい場合はみ出す対応はしていない
     pub fn push_window(&mut self, position: &(f32, f32), frame_size: &(f32, f32), z: f32) {
-        let start_index = if let Some(last) = self.start_points.last() {
-            *last as usize
+        let range = if let Some(last) = self.ranges.last() {
+            (last.start - 9) as u32..last.start as u32
         } else {
-            self.frames.len() - 9
+            (self.frames.len() - 9) as u32..self.frames.len() as u32
         };
-        let slice = &mut self.frames[start_index as usize..start_index + 9];
+        let slice = &mut self.frames[range.start as usize..range.end as usize];
         let tex_size = (self.texture.texture.width(), self.texture.texture.height());
         let tex_index = 0;
         let uv_size = [1.0 / 3.0, 1.0 / 3.0];
@@ -351,12 +359,18 @@ impl FrameRenderer {
         instance.z = z;
         instance.color_multiply = [1.0; 4];
 
-        self.start_points.push(start_index as u32);
         self.queue.write_buffer(
             &self.frame_instance_buffer,
-            (std::mem::size_of::<FrameInstance>() * start_index) as wgpu::BufferAddress,
+            (std::mem::size_of::<FrameInstance>() * range.start as usize) as wgpu::BufferAddress,
             bytemuck::cast_slice(slice),
-        )
+        );
+        self.ranges.push(range);
+    }
+
+    /// ウィンドウ一つ分を取り除く
+    pub fn pop_window(&mut self) {
+        // pop範囲は描画しなくなるので write_buffer は不要
+        self.ranges.pop();
     }
 
     fn create_uniform_buffer(device: &wgpu::Device, logical_size: &[f32; 2]) -> wgpu::Buffer {
@@ -522,7 +536,7 @@ impl FrameRenderer {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
@@ -530,8 +544,8 @@ impl FrameRenderer {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: Some(true), // 書き込みを行う
-                depth_compare: Some(wgpu::CompareFunction::Less), // 手前（小さい値）にあるピクセルを描画
-                stencil: wgpu::StencilState::default(),           // ステンシルは使用しない
+                depth_compare: Some(wgpu::CompareFunction::Greater), // 手前（大きい値）にあるピクセルを描画
+                stencil: wgpu::StencilState::default(),              // ステンシルは使用しない
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {

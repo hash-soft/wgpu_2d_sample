@@ -2,6 +2,7 @@ use anyhow::*;
 use image::GenericImageView;
 use wgpu::Limits;
 
+#[derive(Debug)]
 pub struct Texture {
     #[allow(unused)]
     pub texture: wgpu::Texture,

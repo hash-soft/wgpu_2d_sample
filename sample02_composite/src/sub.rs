@@ -1,9 +1,12 @@
+pub mod data;
 pub mod frame_renderer;
 pub mod key;
 pub mod map_data;
+pub mod shelf_texture_atlas;
 pub mod sprite;
 pub mod text_renderer;
 pub mod texture;
 pub mod tile;
 pub mod tiled_map;
 pub mod utils;
+pub mod window;
