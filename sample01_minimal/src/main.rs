@@ -1,10 +1,10 @@
 use sample01_minimal::{
     run_depth_buffer, run_font_femtovg, run_font_femtovg_off_screen, run_font_glyphon_custom,
-    run_font_glyphon_system, run_off_screen_render, run_polygon_simple, run_sprite_tilemap,
-    run_texture_bindless, run_texture_filter_blur_screen, run_texture_filter_color,
-    run_texture_filter_noise, run_texture_introduction, run_texture_multi_2d_array,
-    run_texture_multi_bind_group, run_texture_tiling, run_texture_uniform, run_viewport,
-    run_viewport_stretch, run_window,
+    run_font_glyphon_system, run_off_screen_render, run_polygon_color_effect, run_polygon_simple,
+    run_sprite_tilemap, run_texture_bindless, run_texture_filter_blur_screen,
+    run_texture_filter_color, run_texture_filter_noise, run_texture_introduction,
+    run_texture_multi_2d_array, run_texture_multi_bind_group, run_texture_tiling,
+    run_texture_uniform, run_viewport, run_viewport_stretch, run_window,
 };
 
 fn main() -> anyhow::Result<()> {
@@ -20,6 +20,7 @@ fn main() -> anyhow::Result<()> {
                 // 特定の文字列の場合の判定
                 match arg.as_str() {
                     "polygon_simple" => 0,            // 三角形の描画
+                    "polygon_color_effect" => 1,      // カラー効果
                     "texture_introduction" => 10,     // 単一のテクスチャ表示
                     "texture_uniform" => 11,          // 同一テクスチャから複数回描画
                     "texture_multi_bind_group" => 12, // BindGropuを複数登録し複数のテクスチャを表示
@@ -52,6 +53,7 @@ fn main() -> anyhow::Result<()> {
 
     match run_id {
         0 => run_polygon_simple::run(),
+        1 => run_polygon_color_effect::run(),
         10 => run_texture_introduction::run(),
         11 => run_texture_uniform::run(),
         12 => run_texture_multi_bind_group::run(),
@@ -71,6 +73,6 @@ fn main() -> anyhow::Result<()> {
         61 => run_texture_filter_color::run(),
         62 => run_texture_filter_blur_screen::run(),
         70 => run_sprite_tilemap::run(),
-        _ => run_texture_tiling::run(),
+        _ => run_polygon_color_effect::run(),
     }
 }
