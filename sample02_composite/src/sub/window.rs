@@ -17,7 +17,8 @@ struct Window {
 pub struct WindowManager {
     windows: Vec<Window>,
     max: u32,
-    item_ranges: Vec<ops::Range<u32>>, // フレームと違い描画順序は自由なので先頭から格納していく
+    frame_ranges: Vec<ops::Range<u32>>, // 前面から描画するので後ろから格納していく
+    item_ranges: Vec<ops::Range<u32>>,  // フレームと違い描画順序は自由なので先頭から格納していく
 }
 
 impl WindowManager {
@@ -25,6 +26,7 @@ impl WindowManager {
         Self {
             windows: vec![],
             max: 50,
+            frame_ranges: vec![],
             item_ranges: vec![],
         }
     }
@@ -39,6 +41,10 @@ impl WindowManager {
         } else {
             None
         }
+    }
+
+    pub fn frame_ranges(&self) -> &Vec<ops::Range<u32>> {
+        &self.frame_ranges
     }
 
     pub fn item_ranges(&self) -> &Vec<ops::Range<u32>> {
@@ -76,7 +82,7 @@ impl WindowManager {
     pub fn pop_window(
         &mut self,
         frame_renderer: &mut FrameRenderer,
-        _text_renderer: &mut TextRenderer,
+        text_renderer: &mut TextRenderer,
     ) {
         // 必要になったときのために一応
         let _ = if let Some(pop) = self.windows.pop() {
@@ -84,15 +90,45 @@ impl WindowManager {
         } else {
             return;
         };
-        frame_renderer.pop_window();
-        self.item_ranges.pop();
-        // todo :text_rendererからpop分を取り除く
-        // キャッシュなので別で行ったほうがいいかも
+        if let Some(pop) = self.frame_ranges.pop() {
+            frame_renderer.back_remain_instance_count(pop.len());
+        }
+        if let Some(pop) = self.item_ranges.pop() {
+            println!("pop item range: {:?}", pop);
+            text_renderer.remove_text(pop.len());
+        }
     }
 
-    pub fn clear(&mut self, text_renderer: &mut TextRenderer) {
+    pub fn clear_text(&mut self, text_renderer: &mut TextRenderer) {
         text_renderer.clear();
         self.item_ranges.clear();
+    }
+
+    pub fn begin_build_frame(&mut self, frame_renderer: &FrameRenderer) {
+        let end = frame_renderer.remain_instance_count() as u32;
+        self.frame_ranges.push(end..end);
+    }
+
+    pub fn end_build_frame(&mut self, frame_renderer: &FrameRenderer) {
+        if let Some(last) = self.frame_ranges.last_mut() {
+            // rangeは追加しておく
+            // zバッファ埋めが必要なので0ということはないが
+            let start = frame_renderer.remain_instance_count() as u32;
+            last.start = start;
+            frame_renderer.write_buffer(last.start as usize..last.end as usize);
+        }
+    }
+
+    pub fn set_frame_color(
+        &mut self,
+        frame_renderer: &mut FrameRenderer,
+        range: ops::Range<u32>,
+        enable: bool,
+    ) {
+        let start = range.start as usize;
+        let end = range.end as usize;
+        frame_renderer.set_color(start..end, enable);
+        frame_renderer.write_buffer(start..end);
     }
 
     pub fn build_frame(&self, frame_renderer: &mut FrameRenderer, index: u32) {
@@ -103,19 +139,32 @@ impl WindowManager {
         };
         // zの分子 テキストの分もあるので2倍かつ0.0より大きくないといけないので+1
         let n_num = (index + 1) as f32 * 2.0 - 1.0;
-        frame_renderer.push_window(&window.position, &window.size, n_num / 256.0);
+        frame_renderer.push_window(&window.position, &window.size, n_num / 256.0, 1);
     }
 
     pub fn begin_build_text(&mut self, text_renderer: &TextRenderer) {
         let start = text_renderer.texts_len() as u32;
-        self.item_ranges.push(start..start + 1);
+        self.item_ranges.push(start..start);
     }
 
     pub fn end_build_text(&mut self, text_renderer: &TextRenderer) {
         if let Some(last) = self.item_ranges.last_mut() {
             // なにも描画しない場合もあるのでstartとendが同じでも追加する必要がある
             last.end = text_renderer.texts_len() as u32;
+            text_renderer.write_buffer(last.start as usize..last.end as usize);
         }
+    }
+
+    pub fn set_text_color(
+        &mut self,
+        text_renderer: &mut TextRenderer,
+        range: ops::Range<u32>,
+        enable: bool,
+    ) {
+        let start = range.start as usize;
+        let end = range.end as usize;
+        text_renderer.set_color(start..end, enable);
+        text_renderer.write_buffer(start..end);
     }
 
     pub fn build_text(

@@ -71,6 +71,7 @@ pub struct TextPaint {
     pub line_width: u8,
     pub color: [u8; 4],
     pub line_color: [u8; 4],
+    pub enable: bool,
 }
 
 /// ahashのため整数と文字列に限定
@@ -518,6 +519,31 @@ impl TextRenderer {
         self.atlas.reset(self.texture_dimension);
     }
 
+    pub fn set_color(&mut self, range: ops::Range<usize>, enable: bool) {
+        let color = if enable {
+            [1.0, 1.0, 1.0, 1.0]
+        } else {
+            [0.5, 0.5, 0.5, 1.0]
+        };
+        let slice = &mut self.texts[range];
+        for instance in slice.iter_mut() {
+            instance.color_multiply = color;
+        }
+    }
+
+    pub fn write_buffer(&self, range: ops::Range<usize>) {
+        if range.is_empty() {
+            return;
+        }
+        let start = range.start;
+        let slice = &self.texts[range];
+        self.queue.write_buffer(
+            &self.text_instance_buffer,
+            (std::mem::size_of::<TextInstance>() * start) as wgpu::BufferAddress,
+            bytemuck::cast_slice(slice),
+        );
+    }
+
     pub fn draw_text(&mut self, x: f32, y: f32, z: f32, text: &str, paint: &TextPaint) {
         if self.texts.len() >= self.max_text {
             return;
@@ -565,10 +591,22 @@ impl TextRenderer {
             texture_index: glyph.texture_index,
             opacity: 1.0,
             z,
-            color_multiply: [1.0, 1.0, 1.0, 1.0],
+            color_multiply: if paint.enable {
+                [1.0, 1.0, 1.0, 1.0]
+            } else {
+                [0.5, 0.5, 0.5, 1.0]
+            },
             color_add: [0.0, 0.0, 0.0, 0.0],
         };
         self.texts.push(instance);
+    }
+
+    pub fn remove_text(&mut self, count: usize) {
+        if count > self.texts.len() {
+            self.texts.clear();
+        } else {
+            self.texts.truncate(self.texts.len() - count);
+        }
     }
 
     pub fn remove_cache(&mut self, text: &str, paint: &TextPaint) {
@@ -619,15 +657,6 @@ impl TextRenderer {
         let cmd = self.canvas.flush_to_output(&self.textures[0].texture);
         self.queue
             .submit(std::iter::once(encoder.finish()).chain(cmd));
-
-        // todo: offsetの位置も指定できるようにする
-        // キャッシュ削除の場合は不要、というかこれ別で分けたほうがいい
-        // instance更新
-        self.queue.write_buffer(
-            &self.text_instance_buffer,
-            0,
-            bytemuck::cast_slice(&self.texts),
-        );
     }
 
     fn create_uniform_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {

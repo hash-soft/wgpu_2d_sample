@@ -1,11 +1,14 @@
 /// マルチウィンドウシステム
-/// todo
-/// - 文字の表示をまとめた処理を作る
-/// - 文字枠をまとめた処理を作る
-/// - 上２つを統合してウィンドウにする
-/// - 深度バッファをつける
-/// - キーで５階層くらいのウィンドウを開く、閉じるをできるようにする
-/// - 流れるメッセージウィンドウを作る
+/// ウィンドウフレーム
+/// - * 完了のはず
+/// todo ウィンドウ項目
+/// - カーソル表示
+/// - カラーエフェクト
+/// - メッセージ表示
+/// todo メニュー
+/// - 複数ウィンドウ管理
+/// todo リサイズ
+/// - 同じサイズの時はリセットしないようにする
 use std::{iter, sync::Arc, vec};
 use winit::{
     application::ApplicationHandler,
@@ -486,9 +489,9 @@ impl State {
         text_renderer.add_font(include_bytes!("../../fonts/GenEiPOPlePw-Bk.ttf"));
         text_renderer.add_font(include_bytes!("../../fonts/yosugaraver1_2.ttf"));
 
-        //let frame_bytes: &[u8] = include_bytes!("../../image/window/Window_vl.png");
+        let frame_bytes: &[u8] = include_bytes!("../../image/window/Window_vl.png");
         // まず実績のあるほうで試してみる
-        let frame_bytes: &[u8] = include_bytes!("../../image/window/WindowBase_blue.png");
+        //let frame_bytes: &[u8] = include_bytes!("../../image/window/WindowBase_blue.png");
         let frame_renderer = FrameRenderer::new(
             &device,
             &queue,
@@ -576,16 +579,18 @@ impl State {
                 height,
                 self.device_params.target_logical_size,
             );
-            self.game_window.clear(&mut self.text_renderer);
-            self.draw_text();
+            // フレームを設定しなおす必要はないのでテキストだけ
+            self.game_window.clear_text(&mut self.text_renderer);
+            self.draw_all_text();
             self.text_renderer.submit(true);
         }
     }
 
-    fn draw_text(&mut self) {
+    fn draw_all_text(&mut self) {
         for i in 0..self.game_window.window_len() {
             let menu_index = self.game_window.item_id(i).unwrap();
-            self.draw_text_normal(i, menu_index);
+            // とりあえず最後だけアクティブにする
+            self.draw_text_normal(i, menu_index, i == self.game_window.window_len() - 1);
         }
     }
 
@@ -904,6 +909,16 @@ impl State {
                 .pop_window(&mut self.frame_renderer, &mut self.text_renderer);
             self.remove_text_cache(self.ram.current_menu_index);
             self.text_renderer.submit(false);
+            // 直前のウィンドウの色を戻す
+            let last_frame = self.game_window.frame_ranges().last().cloned();
+            let last_text = self.game_window.item_ranges().last().cloned();
+            // 範囲の色を変える
+            if let (Some(last_frame), Some(last_text)) = (last_frame, last_text) {
+                self.game_window
+                    .set_frame_color(&mut self.frame_renderer, last_frame, true);
+                self.game_window
+                    .set_text_color(&mut self.text_renderer, last_text, true);
+            }
             // 0になったらマップに戻る
             if self.game_window.window_len() == 0 {
                 self.ram.next_scene = Some(Scene::Map);
@@ -923,13 +938,20 @@ impl State {
         };
 
         let window = &self.rom.windows[start_menu_index as usize];
+
+        // 最後のフレームとテキストの範囲を取得しておく
+        let last_frame = self.game_window.frame_ranges().last().cloned();
+        let last_text = self.game_window.item_ranges().last().cloned();
+
         // フレーム
         let index = self
             .game_window
             .create_window(start_menu_index, window.position, window.size)
             .unwrap();
+        self.game_window.begin_build_frame(&self.frame_renderer);
         self.game_window
             .build_frame(&mut self.frame_renderer, index);
+        self.game_window.end_build_frame(&self.frame_renderer);
 
         // todo 1枚ずつしか描画できないので自動で作成することはせずインデックスを指定する
         // 領域がなくなったら外で追加して別インデックスを指定することにする
@@ -938,15 +960,23 @@ impl State {
         // 2.領域がなければ次のインデックス
         // 3.既存のインデックスになければ新規作成
         // 注) 次のインデックスにまたがる際にコマンドを回収して描画する
-        self.draw_text_normal(index, start_menu_index);
+        self.draw_text_normal(index, start_menu_index, true);
         // todo 描画するテクスチャごとにsubmitを発行しないといけない
         // なのでdraw_text_normalのなかに埋め込まれる感じ
         self.text_renderer.submit(false);
 
+        // 範囲の色を変える
+        if let (Some(last_frame), Some(last_text)) = (last_frame, last_text) {
+            self.game_window
+                .set_frame_color(&mut self.frame_renderer, last_frame, false);
+            self.game_window
+                .set_text_color(&mut self.text_renderer, last_text, false);
+        }
+
         self.ram.start_menu_index = None;
     }
 
-    fn draw_text_normal(&mut self, index: u32, menu_index: u32) {
+    fn draw_text_normal(&mut self, index: u32, menu_index: u32, enable: bool) {
         let window = &self.rom.windows[menu_index as usize];
         // テキスト
         let paint = TextPaint {
@@ -956,6 +986,7 @@ impl State {
             line_width: 4,
             color: [255, 255, 255, 255],
             line_color: [0, 0, 0, 128],
+            enable,
         };
         self.game_window.begin_build_text(&self.text_renderer);
         let height = window.height as f32;
@@ -964,7 +995,7 @@ impl State {
             self.game_window.build_text(
                 &mut self.text_renderer,
                 index,
-                0.0,
+                36.0,
                 y,
                 &window.texts[i],
                 &paint,
@@ -983,6 +1014,7 @@ impl State {
             line_width: 4,
             color: [255, 255, 255, 255],
             line_color: [0, 0, 0, 128],
+            enable: true,
         };
 
         for i in 0..window.texts.len() {

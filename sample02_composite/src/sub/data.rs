@@ -17,7 +17,7 @@ impl Rom {
             windows: vec![
                 DataWindow {
                     position: (120.0, 20.0),
-                    size: (36.0 * 5.0, 200.0),
+                    size: (36.0 * 6.0, 200.0),
                     texts: vec![
                         "じゅもん".to_string(),
                         "どうぐ".to_string(),
